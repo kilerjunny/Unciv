@@ -60,3 +60,10 @@ jobs:
             echo "::error::AndroidLauncher class missing from APK dex - Kotlin sources in :android module were not compiled!"
             exit 1
           fi
+
+      - name: Upload Grand Strategy APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: grand-strategy-debug-apk
+          path: android/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
