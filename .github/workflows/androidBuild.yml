@@ -12,6 +12,7 @@ on:
       - 'gradle-wrapper.properties'
       - 'gradle/libs.versions.toml'
       - 'android/build.gradle.kts'
+      - 'core/src/com/unciv/ui/screens/overviewscreen/FormationOverviewTab.kt'
       - '.github/workflows/androidBuild.yml'
   pull_request_target:
     paths:
