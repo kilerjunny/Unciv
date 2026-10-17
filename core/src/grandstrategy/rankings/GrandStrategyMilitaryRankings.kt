@@ -3,6 +3,7 @@ package grandstrategy.rankings
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.ui.screens.victoryscreen.RankingType
+import yairm210.purity.annotations.Readonly
 
 /** Extra, display-only military power statistics. The vanilla Force metric and AI stay unchanged. */
 object GrandStrategyMilitaryRankings {
@@ -15,6 +16,7 @@ object GrandStrategyMilitaryRankings {
         "순항미사일", "탄도미사일", "유도미사일", "대륙간탄도미사일"
     )
 
+    @Readonly
     fun classification(unit: MapUnit): RankingType? {
         val name = unit.name.trim().lowercase()
         val explicitMissile = name in missileNames ||
@@ -29,6 +31,7 @@ object GrandStrategyMilitaryRankings {
         }
     }
 
+    @Readonly
     fun power(civ: Civilization, category: RankingType): Int = civ.units.getCivUnits()
         .filter { classification(it) == category }
         // Some missile/nuclear units have no conventional combat strength.
