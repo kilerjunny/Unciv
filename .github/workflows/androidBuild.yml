@@ -13,6 +13,10 @@ on:
       - 'gradle/libs.versions.toml'
       - 'android/build.gradle.kts'
       - 'core/src/com/unciv/ui/screens/overviewscreen/FormationOverviewTab.kt'
+      - 'core/src/grandstrategy/rankings/GrandStrategyMilitaryRankings.kt'
+      - 'core/src/com/unciv/logic/civilization/Civilization.kt'
+      - 'core/src/com/unciv/ui/screens/victoryscreen/VictoryScreenCivRankings.kt'
+      - 'core/src/com/unciv/ui/screens/victoryscreen/RankingType.kt'
       - '.github/workflows/androidBuild.yml'
   pull_request_target:
     paths:

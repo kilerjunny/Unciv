@@ -883,6 +883,9 @@ class Civilization : IsPartOfGameInfoSerialization {
                 RankingType.Gold -> gold
                 RankingType.Territory -> cities.sumOf { it.tiles.size }
                 RankingType.Force -> getMilitaryMight()
+                RankingType.ArmyForce, RankingType.NavyForce, RankingType.AirForce,
+                RankingType.AsymmetricForce ->
+                    grandstrategy.rankings.GrandStrategyMilitaryRankings.power(this, category)
                 RankingType.Happiness -> getHappiness()
                 RankingType.Technologies -> tech.researchedTechnologies.size
                 RankingType.Culture -> policies.adoptedPolicies.count { !Policy.isBranchCompleteByName(it) }

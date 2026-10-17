@@ -25,7 +25,16 @@ class VictoryScreenCivRankings(
             .filter { it.isMajorCiv() }
             .filter { targetCiv -> VictoryScreen.canViewCivStats(worldScreen.gameInfo, worldScreen.selectedGameView.civView.getCiv(), targetCiv) }
 
-        for (category in RankingType.filteredEntries(worldScreen.gameInfo.gameParameters)) {
+        // Avoid empty air/missile columns in Renaissance-only games.
+        val visibleCategories = RankingType.filteredEntries(worldScreen.gameInfo.gameParameters)
+            .filter { category ->
+                when (category) {
+                    RankingType.AirForce, RankingType.AsymmetricForce ->
+                        majorCivs.any { it.getStatForRanking(category) > 0 }
+                    else -> true
+                }
+            }
+        for (category in visibleCategories) {
             val textAndIcon = Table()
             val columnImage = category.getImage()
             if (columnImage != null)
