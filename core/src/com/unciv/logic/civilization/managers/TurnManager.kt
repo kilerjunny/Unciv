@@ -27,6 +27,11 @@ class TurnManager(val civInfo: Civilization) {
     fun startTurn(progressBar: NextTurnProgress? = null):Unit = timeThis("TurnManager.startTurn") {
         if (civInfo.isSpectator()) return
 
+        // Grand Strategy: eliminate stale unit references once the new turn starts.
+        val formationManager = grandstrategy.formations.FormationManager(civInfo.grandStrategyFormations)
+        formationManager.reconcileLiveUnits(civInfo.units.getCivUnits().map { it.id.toString() }.toSet())
+        civInfo.grandStrategyFormations = formationManager.snapshot()
+
         for (city in civInfo.cities) city.hasSoldBuildingThisTurn = false
 
         civInfo.threatManager.clear()

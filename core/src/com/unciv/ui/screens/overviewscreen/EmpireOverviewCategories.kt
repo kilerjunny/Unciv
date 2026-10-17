@@ -44,6 +44,11 @@ enum class EmpireOverviewCategories(
         override fun showDisabled(viewingPlayer: CivView) = viewingPlayer.getCiv().units.getCivUnits().none()
         override fun getPersistDataClass() = UnitOverviewTab.UnitTabPersistableData::class.java
     },
+    Formations("OtherIcons/Shield", 'F', Align.topLeft) {
+        override fun createTab(viewingPlayer: CivView, overviewScreen: EmpireOverviewScreen, persistedData: EmpireOverviewTabPersistableData?) =
+                FormationOverviewTab(viewingPlayer, overviewScreen)
+        override fun showDisabled(viewingPlayer: CivView) = viewingPlayer.isSpectator()
+    },
     Politics("OtherIcons/Politics", 'P', Align.top) {
         override fun createTab(viewingPlayer: CivView, overviewScreen: EmpireOverviewScreen, persistedData: EmpireOverviewTabPersistableData?) =
                 GlobalPoliticsOverviewTable(viewingPlayer, overviewScreen, persistedData)

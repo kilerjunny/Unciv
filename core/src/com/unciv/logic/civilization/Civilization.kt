@@ -163,6 +163,9 @@ class Civilization : IsPartOfGameInfoSerialization {
      */
     var civID = ""
 
+    /** Grand Strategy formation data serialized in the game save. */
+    var grandStrategyFormations = grandstrategy.formations.FormationSnapshot()
+
     var tech = TechManager()
     var policies = PolicyManager()
     var civConstructions = CivConstructions()
@@ -314,6 +317,10 @@ class Civilization : IsPartOfGameInfoSerialization {
         toReturn.lastTurnProcessedWithVersion = lastTurnProcessedWithVersion
         toReturn.civName = civName
         toReturn.civID = civID
+        toReturn.grandStrategyFormations = grandStrategyFormations.copy(
+            formations = grandStrategyFormations.formations.map { it.copy() },
+            assignments = grandStrategyFormations.assignments.map { it.copy() }
+        )
         toReturn.tech = tech.clone()
         toReturn.policies = policies.clone()
         toReturn.civConstructions = civConstructions.clone().also { it.setTransients(toReturn) }
