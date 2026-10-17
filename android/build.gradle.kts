@@ -28,7 +28,7 @@ android {
     }
     defaultConfig {
         namespace = BuildConfig.identifier
-        applicationId = BuildConfig.identifier
+        applicationId = "com.unciv.grandstrategy"
         minSdk = 21
         targetSdk = 36
         versionCode = BuildConfig.appCodeNumber
