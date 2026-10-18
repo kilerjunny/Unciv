@@ -43,6 +43,8 @@ object NextTurnAutomation {
         if (civInfo.isSpectator()) return // When there's a spectator in multiplayer games, it's processed automatically, but shouldn't be able to actually do anything
 
         val civView = GameView(civInfo.gameInfo, civInfo).civView
+        // v0.9: calculate a strategic priority without changing existing AI behavior.
+        if (tradeAndChangeState && civInfo.isMajorCiv()) GrandStrategyAI.assess(civInfo)
 
         respondToPopupAlerts(civInfo)
         TradeAutomation.respondToTradeRequests(civInfo, tradeAndChangeState)
