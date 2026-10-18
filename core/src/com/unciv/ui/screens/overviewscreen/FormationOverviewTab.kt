@@ -16,7 +16,7 @@ import grandstrategy.formations.Formation
 import grandstrategy.formations.FormationManager
 import java.util.UUID
 
-/** v0.5: compact split-pane formation manager. Only formation assignments are mutated. */
+/** v0.6: one-level-at-a-time formation navigator with optional full hierarchy overview. */
 class FormationOverviewTab(
     viewingPlayer: CivView,
     overviewScreen: EmpireOverviewScreen
@@ -27,7 +27,7 @@ class FormationOverviewTab(
     private var deleteConfirmationId: String? = null
     private var movingId: String? = null
     private var showUnitPicker = false
-    private val expandedIds = mutableSetOf<String>()
+    private var showWholeTree = false
 
     init {
         top()
@@ -100,74 +100,103 @@ class FormationOverviewTab(
     ): Int = (unitGroups[id]?.size ?: 0) +
         formations.children(id).sumOf { subtreeCount(it.id, unitGroups) }
 
-    /** One tappable row per formation: tap toggles its children and opens its details. */
-    private fun addTreeNode(
-        target: Table,
-        node: Formation,
-        depth: Int,
-        unitGroups: Map<String, List<MapUnit>>
-    ) {
-        val children = formations.children(node.id)
-        val ownUnits = unitGroups[node.id].orEmpty()
-        val hasChildren = children.isNotEmpty() || ownUnits.isNotEmpty()
-        val isOpen = node.id in expandedIds
-        val symbol = when {
-            !hasChildren -> "[ ]"
-            isOpen -> "[-]"
-            else -> "[+]"
+    /** Navigate to one formation. The left panel only shows its immediate children. */
+    private fun navigateTo(id: String?) {
+        selectedId = if (id == null || formations.get(id) != null) id else null
+        movingId = null
+        deleteConfirmationId = null
+        showUnitPicker = false
+        showWholeTree = false
+        render()
+    }
+
+    /** Only the current level is visible here, never grandchildren. */
+    private fun drawLevel(target: Table, unitGroups: Map<String, List<MapUnit>>) {
+        val selected = selectedId?.let(formations::get)
+        title(target, "단계별 편제 탐색")
+
+        // Clickable path makes deep hierarchies navigable without repeatedly backing out.
+        val breadcrumbs = Table(BaseScreen.skin)
+        breadcrumbs.add(textButton("전체") { navigateTo(null) }).padRight(2f)
+        for (ancestor in formations.ancestors(selectedId).asReversed()) {
+            breadcrumbs.add(">".toLabel(hideIcons = true)).padLeft(2f).padRight(2f)
+            breadcrumbs.add(textButton(ancestor.name) { navigateTo(ancestor.id) }).padRight(2f)
         }
-        val selection = if (selectedId == node.id) " *" else ""
-        val label = "$symbol ${node.name} (${subtreeCount(node.id, unitGroups)})$selection"
-        target.add(textButton(label) {
-            selectedId = node.id
-            deleteConfirmationId = null
-            movingId = null
-            showUnitPicker = false
-            if (hasChildren) {
-                if (!expandedIds.add(node.id)) expandedIds.remove(node.id)
-            }
+        target.add(breadcrumbs).left().row()
+
+        val toolbar = Table(BaseScreen.skin)
+        if (selected != null) {
+            toolbar.add(textButton("< 상위 편제") { navigateTo(selected.parentId) }).growX()
+        } else {
+            toolbar.add(textButton("전체 편제") { navigateTo(null) }).growX()
+        }
+        toolbar.add(textButton("전체 조직망") {
+            showWholeTree = true
             render()
-        }).growX().height(37f).padLeft(depth * 15f).row()
-        if (!isOpen) return
-        for (child in children) addTreeNode(target, child, depth + 1, unitGroups)
-        for (unit in ownUnits) {
-            // Directly tap an assigned unit in the tree to center the map on it.
-            target.add(textButton("- " + unit.displayName() + " >") {
-                goToUnit(unit.id)
-            }).growX().height(32f).padLeft((depth + 1) * 15f).row()
+        }).growX().padLeft(3f)
+        target.add(toolbar).growX().row()
+
+        val children = formations.children(selectedId)
+        title(target, (selected?.name ?: "전체 편제") + " / 직속 하위 " + children.size + "개")
+        if (children.isEmpty()) title(target, "하위 편제가 없습니다.")
+        for (child in children) {
+            val directCount = unitGroups[child.id]?.size ?: 0
+            val totalCount = subtreeCount(child.id, unitGroups)
+            val label = child.name + "  >  (직속 " + directCount + " / 전체 " + totalCount + ")"
+            target.add(textButton(label) { navigateTo(child.id) })
+                .growX().height(43f).row()
         }
     }
 
-    private fun drawTree(target: Table, unitGroups: Map<String, List<MapUnit>>) {
-        title(target, "편제 조직도")
-        val treeToolbar = Table(BaseScreen.skin)
-        treeToolbar.add(textButton("모두 펼치기") {
-            expandedIds.addAll(formations.all().map { it.id })
-            render()
-        }).growX()
-        treeToolbar.add(textButton("모두 접기") {
-            expandedIds.clear()
-            render()
-        }).growX().padLeft(3f)
-        target.add(treeToolbar).growX().row()
+    /** All-level overview, with ASCII branch links that work even if icon fonts are missing. */
+    private fun drawNetworkNode(
+        target: Table,
+        node: Formation,
+        prefix: String,
+        isLast: Boolean,
+        unitGroups: Map<String, List<MapUnit>>
+    ) {
+        val connector = when {
+            node.parentId == null -> ""
+            isLast -> "\\-- "
+            else -> "|-- "
+        }
+        val line = Table(BaseScreen.skin)
+        line.add((prefix + connector).toLabel(hideIcons = true)).left()
+        val count = subtreeCount(node.id, unitGroups)
+        line.add(textButton(node.name + " (" + count + ")") { navigateTo(node.id) })
+            .growX()
+        target.add(line).growX().row()
 
-        val count = unitGroups.values.sumOf { it.size }
-        title(target, "편제 " + formations.all().size + "개 · 배속 " + count + "개")
+        val nextPrefix = prefix + when {
+            node.parentId == null -> ""
+            isLast -> "    "
+            else -> "|   "
+        }
+        val children = formations.children(node.id)
+        for ((index, child) in children.withIndex()) {
+            drawNetworkNode(target, child, nextPrefix, index == children.lastIndex, unitGroups)
+        }
+    }
+
+    private fun drawNetwork(target: Table, unitGroups: Map<String, List<MapUnit>>) {
+        title(target, "전체 편제 조직망")
+        target.add(textButton("< 단계별 탐색") {
+            showWholeTree = false
+            render()
+        }).growX().row()
+        title(target, "연결된 편제를 누르면 해당 단계로 이동합니다.")
         val roots = formations.children(null)
-        if (roots.isEmpty()) title(target, "편제가 없습니다. 오른쪽에서 생성하세요.")
-        for (root in roots) addTreeNode(target, root, 0, unitGroups)
+        if (roots.isEmpty()) title(target, "생성된 편제가 없습니다.")
+        for (root in roots) drawNetworkNode(target, root, "", true, unitGroups)
     }
 
     private fun drawDetail(target: Table, units: List<MapUnit>, unitGroups: Map<String, List<MapUnit>>) {
         val selected = selectedId?.let(formations::get)
         title(target, "편제 관리 · " + (selected?.name ?: "최상위"))
         if (selected != null) {
-            actionRow(target, "상위로 돌아가기", "최상위") {
-                selectedId = null
-                movingId = null
-                deleteConfirmationId = null
-                showUnitPicker = false
-                render()
+            actionRow(target, "상위 편제로 돌아가기", "상위로") {
+                navigateTo(selected.parentId)
             }
         }
 
@@ -203,7 +232,6 @@ class FormationOverviewTab(
                 title(target, "'" + toDelete.name + "' 및 하위 편제를 삭제할까요?")
                 actionRow(target, "유닛은 유지하며 배속만 해제됩니다.", "삭제 확인") {
                     val deleted = formations.deleteSubtree(targetId)
-                    expandedIds.removeAll(deleted)
                     selectedId?.let { if (it in deleted) selectedId = null }
                     deleteConfirmationId = null
                     showUnitPicker = false
@@ -231,7 +259,6 @@ class FormationOverviewTab(
                 actionRow(target, candidate.name, "여기로") {
                     formations.move(moveId, candidate.id)
                     movingId = null
-                    expandedIds.add(candidate.id)
                     commit()
                 }
             }
@@ -250,7 +277,6 @@ class FormationOverviewTab(
             row.add(editButton("생성") {
                 if (newName.text.isNotBlank()) {
                     formations.create(UUID.randomUUID().toString(), newName.text, selectedId)
-                    selectedId?.let { expandedIds.add(it) }
                     commit()
                 }
             }).padLeft(3f)
@@ -279,13 +305,9 @@ class FormationOverviewTab(
             node.id != selected.id && formations.ancestors(node.id).any { it.id == selected.id }
         }.map { it.id }.toSet()
         val nested = units.filter { formations.assignedFormation(it.id.toString()) in descendants }
-        title(target, "하위 편제 소속 유닛 " + nested.size + "개")
-        for (unit in nested) {
-            val name = formations.assignedFormation(unit.id.toString())?.let {
-                formations.get(it)?.name
-            } ?: "?"
-            addUnitRow(target, unit, name + " / ")
-        }
+        // Summary only. To see a unit belonging to a deeper level, drill into its folder.
+        title(target, "하위 편제에 배속된 유닛 " + nested.size + "개")
+        if (nested.isNotEmpty()) title(target, "왼쪽에서 하위 편제를 선택해 유닛을 확인하세요.")
 
         if (editable()) {
             val candidates = units.filter { formations.assignedFormation(it.id.toString()) != selected.id }
@@ -319,7 +341,7 @@ class FormationOverviewTab(
 
         val tree = Table(BaseScreen.skin).apply { top(); defaults().pad(3f) }
         val detail = Table(BaseScreen.skin).apply { top(); defaults().pad(3f) }
-        drawTree(tree, unitGroups)
+        if (showWholeTree) drawNetwork(tree, unitGroups) else drawLevel(tree, unitGroups)
         drawDetail(detail, units, unitGroups)
 
         val stageWidth = overviewScreen.stage.width
