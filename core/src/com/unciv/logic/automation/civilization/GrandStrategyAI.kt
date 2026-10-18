@@ -10,6 +10,7 @@ import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
 internal object GrandStrategyAI {
     enum class Priority { EconomicRecovery, Security, Diplomacy, Expansion }
 
+    @Readonly
     fun strongestKnownThreat(civ: Civilization): Civilization? {
         val rivals = civ.getKnownCivs().filter {
             it.isMajorCiv() && it.isAlive() && it != civ
