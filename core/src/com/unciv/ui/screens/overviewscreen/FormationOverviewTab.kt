@@ -311,18 +311,15 @@ class FormationOverviewTab(
         if (nested.isNotEmpty()) title(target, "왼쪽에서 하위 편제를 선택해 유닛을 확인하세요.")
 
         if (editable()) {
-            val candidates = units.filter { formations.assignedFormation(it.id.toString()) != selected.id }
-            actionRow(target, "배속 / 전속 가능한 유닛 " + candidates.size + "개",
+            val candidates = units.filter { formations.assignedFormation(it.id.toString()) == null }
+            actionRow(target, "미배속 유닛 " + candidates.size + "개",
                 if (showUnitPicker) "목록 닫기" else "목록 열기") {
                 showUnitPicker = !showUnitPicker
                 render()
             }
             if (showUnitPicker) {
                 for (unit in candidates) {
-                    val oldName = formations.assignedFormation(unit.id.toString())?.let {
-                        formations.get(it)?.name
-                    } ?: "미배속"
-                    actionRow(target, unit.displayName() + " / " + oldName, "배속") {
+                    actionRow(target, unit.displayName() + " / 미배속", "배속") {
                         formations.assignUnit(unit.id.toString(), selected.id)
                         commit()
                     }
