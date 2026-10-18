@@ -358,6 +358,7 @@ object DiplomacyAutomation {
         if (civView.cities().isEmpty() || civView.getKnownCivs().none()) return
         if (civView.getPersonalityValue(PersonalityValue.DeclareWar) == 0f) return
         if (civView.getHappiness() <= 0) return
+        if (GrandStrategyAI.assess(civView.getCiv()) == GrandStrategyAI.Priority.EconomicRecovery) return
 
         val ourMilitaryUnits = civView.getUnits().count { !it.isCivilian() }
         if (ourMilitaryUnits < civView.cities().size) return
