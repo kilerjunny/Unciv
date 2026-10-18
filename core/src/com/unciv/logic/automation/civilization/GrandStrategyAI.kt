@@ -1,5 +1,6 @@
 package com.unciv.logic.automation.civilization
 
+import yairm210.purity.annotations.Readonly
 import com.unciv.logic.automation.Automation
 import com.unciv.logic.automation.ThreatLevel
 import com.unciv.logic.civilization.Civilization
@@ -20,6 +21,7 @@ internal object GrandStrategyAI {
         }
     }
 
+    @Readonly
     fun hasCommonThreat(civ: Civilization, partner: Civilization): Boolean {
         val threat = strongestKnownThreat(civ) ?: return false
         if (threat == partner || threat == civ) return false
