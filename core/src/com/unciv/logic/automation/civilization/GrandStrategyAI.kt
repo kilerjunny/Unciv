@@ -1,11 +1,24 @@
 package com.unciv.logic.automation.civilization
 
+import com.unciv.logic.automation.Automation
+import com.unciv.logic.automation.ThreatLevel
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
 
 /** Read-only strategic assessment. v0.9 does not change vanilla AI decisions yet. */
 internal object GrandStrategyAI {
     enum class Priority { EconomicRecovery, Security, Diplomacy, Expansion }
+
+    fun strongestKnownThreat(civ: Civilization): Civilization? {
+        val rivals = civ.getKnownCivs().filter {
+            it.isMajorCiv() && it.isAlive() && it != civ
+        }
+        return rivals.firstOrNull {
+            Automation.threatAssessment(civ, it) == ThreatLevel.VeryHigh
+        } ?: rivals.firstOrNull {
+            Automation.threatAssessment(civ, it) == ThreatLevel.High
+        }
+    }
 
     fun assess(civ: Civilization): Priority {
         val income = civ.stats.statsForNextTurn.gold
