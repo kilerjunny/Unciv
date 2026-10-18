@@ -79,6 +79,11 @@ object DiplomacyAutomation {
             else -> 0
         }
 
+        // Shared external threats encourage diplomatic cooperation.
+        // Existing relationship and eligibility checks still apply.
+        if (GrandStrategyAI.hasCommonThreat(civInfo, otherCiv))
+            motivation += 15f
+
         // Try to ally with a fourth of the civs in play
         val civsToAllyWith = 0.25f * allAliveCivs * civInfo.getPersonality().scaledFocus(PersonalityValue.Diplomacy)
         if (numOfFriends < civsToAllyWith) {

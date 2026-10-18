@@ -20,6 +20,13 @@ internal object GrandStrategyAI {
         }
     }
 
+    fun hasCommonThreat(civ: Civilization, partner: Civilization): Boolean {
+        val threat = strongestKnownThreat(civ) ?: return false
+        if (threat == partner || threat == civ) return false
+        if (!partner.knows(threat)) return false
+        return strongestKnownThreat(partner) == threat
+    }
+
     fun assess(civ: Civilization): Priority {
         val income = civ.stats.statsForNextTurn.gold
         if (civ.gold < 0 || (civ.gold < 100 && income < 0f)) return Priority.EconomicRecovery
