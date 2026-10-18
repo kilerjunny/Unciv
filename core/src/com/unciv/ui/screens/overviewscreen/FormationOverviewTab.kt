@@ -1,5 +1,6 @@
 package com.unciv.ui.screens.overviewscreen
 
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton
 import com.badlogic.gdx.scenes.scene2d.ui.TextField
@@ -16,7 +17,7 @@ import grandstrategy.formations.Formation
 import grandstrategy.formations.FormationManager
 import java.util.UUID
 
-/** v0.6: one-level-at-a-time formation navigator with optional full hierarchy overview. */
+/** v0.7: compact stepwise formation navigator with independently scrolling tablet panels. */
 class FormationOverviewTab(
     viewingPlayer: CivView,
     overviewScreen: EmpireOverviewScreen
@@ -144,7 +145,7 @@ class FormationOverviewTab(
             val totalCount = subtreeCount(child.id, unitGroups)
             val label = child.name + "  >  (직속 " + directCount + " / 전체 " + totalCount + ")"
             target.add(textButton(label) { navigateTo(child.id) })
-                .growX().height(43f).row()
+                .growX().height(33f).row()
         }
     }
 
@@ -158,20 +159,20 @@ class FormationOverviewTab(
     ) {
         val connector = when {
             node.parentId == null -> ""
-            isLast -> "\\-- "
-            else -> "|-- "
+            isLast -> "└─ "
+            else -> "├─ "
         }
         val line = Table(BaseScreen.skin)
         line.add((prefix + connector).toLabel(hideIcons = true)).left()
         val count = subtreeCount(node.id, unitGroups)
         line.add(textButton(node.name + " (" + count + ")") { navigateTo(node.id) })
-            .growX()
+            .growX().height(32f)
         target.add(line).growX().row()
 
         val nextPrefix = prefix + when {
             node.parentId == null -> ""
-            isLast -> "    "
-            else -> "|   "
+            isLast -> "   "
+            else -> "│  "
         }
         val children = formations.children(node.id)
         for ((index, child) in children.withIndex()) {
@@ -346,9 +347,18 @@ class FormationOverviewTab(
 
         val stageWidth = overviewScreen.stage.width
         if (stageWidth >= 780f) {
-            // Tablet: fixed independent columns, no more repeated management buttons in the tree.
-            add(tree).width(stageWidth * 0.43f).top().padRight(5f)
-            add(detail).width(stageWidth * 0.49f).top().row()
+            // Independent scrolling: a long organization no longer pushes management off-screen.
+            val availableHeight = overviewScreen.stage.height * 0.69f
+            val treeScroll = ScrollPane(tree, BaseScreen.skin).apply {
+                setFadeScrollBars(false)
+                setScrollingDisabled(true, false)
+            }
+            val detailScroll = ScrollPane(detail, BaseScreen.skin).apply {
+                setFadeScrollBars(false)
+                setScrollingDisabled(true, false)
+            }
+            add(treeScroll).width(stageWidth * 0.43f).height(availableHeight).top().padRight(5f)
+            add(detailScroll).width(stageWidth * 0.49f).height(availableHeight).top().row()
         } else {
             // Phones: the same controls stack vertically to stay reachable.
             add(tree).growX().row()
