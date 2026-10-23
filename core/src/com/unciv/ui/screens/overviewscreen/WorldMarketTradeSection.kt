@@ -8,6 +8,7 @@ import com.unciv.logic.market.WorldMarket
 import com.unciv.logic.market.WorldMarketTrading
 import com.unciv.ui.components.extensions.toLabel
 import com.unciv.ui.components.input.onClick
+import com.unciv.ui.images.ImageGetter
 import com.unciv.ui.screens.basescreen.BaseScreen
 import com.unciv.view.CivView
 
@@ -44,6 +45,15 @@ class WorldMarketTradeSection(
         }
         header.add(toggle)
 
+        val resourcesButton =
+            TextButton("자원 현황", BaseScreen.skin)
+        resourcesButton.onClick {
+            parentTab.overviewScreen.select(
+                EmpireOverviewCategories.Resources, ""
+            )
+        }
+        header.add(resourcesButton).padLeft(5f)
+
         add(header).growX().row()
 
         if (message.isNotEmpty())
@@ -55,6 +65,8 @@ class WorldMarketTradeSection(
             .left().growX().row()
 
         val buyer = playerView.getCiv()
+        add("내 보유 금: ${buyer.gold}G".toLabel())
+            .left().growX().row()
         val gameInfo = buyer.gameInfo
         val spectator = playerView.isSpectator()
 
@@ -81,9 +93,27 @@ class WorldMarketTradeSection(
             val line = Table(BaseScreen.skin)
 
             line.add(
-                "${listing.resource} · ${listing.seller} · ${listing.quantity}개"
+                ImageGetter.getResourcePortrait(
+                    listing.resource, 32f
+                )
+            ).size(32f).padRight(5f)
+
+            val owned = buyer.getResourceAmount(
+                listing.resource
+            )
+
+            val info = Table(BaseScreen.skin)
+            info.add(
+                "${listing.resource} · ${listing.seller}"
                     .toLabel(hideIcons = true)
-            ).left().growX()
+            ).left().row()
+
+            info.add(
+                "판매 ${listing.quantity}개 · 내 가용 ${owned}개"
+                    .toLabel()
+            ).left().row()
+
+            line.add(info).growX().left()
 
             line.add("${price}G".toLabel()).padRight(6f)
 

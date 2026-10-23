@@ -22,9 +22,15 @@ class TradesOverviewTab(
         defaults().pad(10f)
         add(WorldMarketTradeSection(viewingPlayer, this)).growX().row()
         addSeparator()
+        add("기존 외교 거래 내역".toLabel(
+            fontSize = Constants.headingFontSize
+        )).left().row()
+        add("내 제공 항목 / 상대국 제공 항목".toLabel())
+            .left().row()
+
         val diplomaciesWithPendingTrade = viewingPlayer.getCiv().diplomacy.values.filter { it.otherCiv.tradeRequests.any { it.requestingCiv == viewingPlayer.getCiv().civID } }
         if (diplomaciesWithPendingTrade.isNotEmpty())
-            add("Pending trades".toLabel(fontSize = Constants.headingFontSize)).padTop(10f).row()
+            add("협상 중인 거래".toLabel(fontSize = Constants.headingFontSize)).padTop(10f).row()
         for (diplomacy in diplomaciesWithPendingTrade) {
             for (tradeRequest in diplomacy.otherCiv.tradeRequests.filter { it.requestingCiv == viewingPlayer.getCiv().civID })
                 add(createTradeTable(tradeRequest.trade.reverse(), diplomacy.otherCiv)).row()
@@ -43,7 +49,7 @@ class TradesOverviewTab(
                 }
             }
         if (diplomaciesWithExistingTrade.isNotEmpty())
-            add("Current trades".toLabel(fontSize = Constants.headingFontSize)).padTop(10f).row()
+            add("진행 중인 거래 계약".toLabel(fontSize = Constants.headingFontSize)).padTop(10f).row()
         for (diplomacy in diplomaciesWithExistingTrade) {
             for (trade in diplomacy.trades)
                 add(createTradeTable(trade, diplomacy.otherCiv)).row()
