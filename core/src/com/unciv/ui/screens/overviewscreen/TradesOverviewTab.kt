@@ -20,6 +20,8 @@ class TradesOverviewTab(
 
     init {
         defaults().pad(10f)
+        add(WorldMarketTradeSection(viewingPlayer, this)).growX().row()
+        addSeparator()
         val diplomaciesWithPendingTrade = viewingPlayer.getCiv().diplomacy.values.filter { it.otherCiv.tradeRequests.any { it.requestingCiv == viewingPlayer.getCiv().civID } }
         if (diplomaciesWithPendingTrade.isNotEmpty())
             add("Pending trades".toLabel(fontSize = Constants.headingFontSize)).padTop(10f).row()

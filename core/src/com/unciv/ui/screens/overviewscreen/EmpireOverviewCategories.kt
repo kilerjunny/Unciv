@@ -32,11 +32,7 @@ enum class EmpireOverviewCategories(
     Trades("StatIcons/Acquire", 'T', Align.top) {
         override fun createTab(viewingPlayer: CivView, overviewScreen: EmpireOverviewScreen, persistedData: EmpireOverviewTabPersistableData?) =
                 TradesOverviewTab(viewingPlayer, overviewScreen)
-        override fun showDisabled(viewingPlayer: CivView) =
-                viewingPlayer.getCiv().diplomacy.values.all { it.trades.isEmpty() } &&
-                viewingPlayer.getCiv().diplomacy.values.none { diplomacyManager ->
-                        diplomacyManager.otherCiv.tradeRequests.any { it.requestingCiv == viewingPlayer.getCiv().civID }
-                    }
+        override fun showDisabled(viewingPlayer: CivView) = false
     },
     Units("OtherIcons/Shield", 'U', Align.topLeft) {
         override fun createTab(viewingPlayer: CivView, overviewScreen: EmpireOverviewScreen, persistedData: EmpireOverviewTabPersistableData?) =

@@ -17,7 +17,7 @@ object WorldMarket {
         val listings = ArrayList<MarketResourceListing>()
 
         for (civ in gameInfo.civilizations) {
-            if (!civ.isMajorCiv() || civ.isDefeated()) continue
+            if ((!civ.isMajorCiv() && !civ.isCityState) || civ.isDefeated()) continue
 
             for (entry in civ.getPerTurnResourcesWithOriginsForTrade()) {
                 if (entry.origin != Constants.tradable) continue
