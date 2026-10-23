@@ -19,6 +19,7 @@ import com.unciv.logic.civilization.managers.TechManager
 import com.unciv.logic.civilization.managers.TurnManager
 import com.unciv.logic.civilization.managers.VictoryManager
 import com.unciv.logic.github.Github.repoNameToFolderName
+import com.unciv.logic.market.MarketSellOrder
 import com.unciv.logic.map.MapShape
 import com.unciv.logic.map.TileMap
 import com.unciv.logic.map.tile.Tile
@@ -104,6 +105,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     override var version = CompatibilityVersion.FIRST_WITHOUT
 
     var civilizations = ArrayList<Civilization>()
+    var worldMarketOrders = ArrayList<MarketSellOrder>()
     var barbarians = BarbarianManager()
     var religions: HashMap<String, Religion> = hashMapOf()
     var difficulty = "Chieftain" // difficulty is game-wide, think what would happen if 2 human players could play on different difficulties?
@@ -200,6 +202,9 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
         toReturn.civilizations = civilizations.asSequence()
             .map { it.clone() }
             .toCollection(ArrayList(civilizations.size))
+        toReturn.worldMarketOrders.addAll(
+            worldMarketOrders.map { it.copy() }
+        )
         toReturn.barbarians = barbarians.clone()
         toReturn.religions.putAll(religions.asSequence().map { it.key to it.value.clone() })
         toReturn.currentPlayer = currentPlayer

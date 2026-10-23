@@ -70,6 +70,15 @@ class WorldMarketTradeSection(
         val gameInfo = buyer.gameInfo
         val spectator = playerView.isSpectator()
 
+        if (!spectator) {
+            add(
+                WorldMarketSellSection(playerView) {
+                    render()
+                    parentTab.overviewScreen.resizePage(parentTab)
+                }
+            ).growX().row()
+        }
+
         val known = buyer.getKnownCivs()
             .map { it.civName }.toSet()
 
