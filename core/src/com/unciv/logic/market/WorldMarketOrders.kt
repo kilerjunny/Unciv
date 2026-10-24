@@ -4,8 +4,82 @@ import com.unciv.Constants
 import com.unciv.logic.civilization.Civilization
 import com.unciv.models.ruleset.tile.ResourceType
 import java.util.UUID
+import yairm210.purity.annotations.Readonly
 
 object WorldMarketOrders {
+
+    /** Adjust outstanding sell orders to the seller's current supply. */
+    fun reconcileSellerOrders(seller: Civilization) {
+        val game = seller.gameInfo
+
+        val orders = game.worldMarketOrders
+            .filter { it.sellerCivId == seller.civID }
+            .sortedWith(
+                compareBy<MarketSellOrder> { it.createdTurn }
+                    .thenBy { it.id }
+            )
+
+        val allocated = HashMap<String, Int>()
+
+        for (order in orders) {
+            val resource = game.ruleset.tileResources[order.resourceName]
+
+            val valid = resource != null &&
+                resource.resourceType != ResourceType.Bonus &&
+                resource.isStockpiled == order.stockpiled &&
+                !seller.isDefeated()
+
+            val supply = if (!valid) {
+                0
+            } else {
+                val resources = if (resource!!.isStockpiled)
+                    seller.getStockpiledResourcesForTrade()
+                else
+                    seller.getPerTurnResourcesWithOriginsForTrade()
+
+                resources.filter {
+                    it.origin == Constants.tradable &&
+                    it.resource.name == order.resourceName
+                }.sumOf { it.amount }.coerceAtLeast(0)
+            }
+
+            val alreadyAllocated =
+                allocated[order.resourceName] ?: 0
+
+            val remaining =
+                (supply - alreadyAllocated).coerceAtLeast(0)
+
+            order.quantity =
+                order.quantity.coerceIn(0, remaining)
+
+            if (order.quantity == 0) {
+                game.worldMarketOrders.remove(order)
+            } else {
+                allocated[order.resourceName] =
+                    alreadyAllocated + order.quantity
+            }
+        }
+    }
+
+    @Readonly
+    fun reservedFor(
+        seller: Civilization,
+        resourceName: String,
+        fulfillingOrderId: String? = null
+    ): Int {
+        val orders = seller.gameInfo.worldMarketOrders.filter {
+            it.sellerCivId == seller.civID &&
+            it.resourceName == resourceName &&
+            it.quantity > 0
+        }
+
+        val reserved = orders.sumOf { it.quantity }
+
+        // An order being fulfilled may use one reserved unit.
+        val fulfilling = orders.any { it.id == fulfillingOrderId }
+        return (reserved - if (fulfilling) 1 else 0)
+            .coerceAtLeast(0)
+    }
 
     fun availableToList(
         seller: Civilization,
@@ -28,12 +102,7 @@ object WorldMarketOrders {
             }
             .sumOf { it.amount }
 
-        val alreadyListed = seller.gameInfo.worldMarketOrders
-            .filter {
-                it.sellerCivId == seller.civID &&
-                it.resourceName == resourceName
-            }
-            .sumOf { it.quantity.coerceAtLeast(0) }
+        val alreadyListed = reservedFor(seller, resourceName)
 
         return (available - alreadyListed).coerceAtLeast(0)
     }

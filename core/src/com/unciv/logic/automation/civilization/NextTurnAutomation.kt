@@ -16,6 +16,7 @@ import com.unciv.logic.civilization.NotificationIcon
 import com.unciv.logic.civilization.PopupAlert
 import com.unciv.logic.civilization.diplomacy.*
 import com.unciv.logic.market.WorldMarketAI
+import com.unciv.logic.market.WorldMarketAutoSupply
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.MilestoneType
@@ -77,8 +78,10 @@ object NextTurnAutomation {
             civInfo.cityStateFunctions.updateDiplomaticRelationshipForCityState()
         }
 
-        if (tradeAndChangeState && civInfo.isAI())
+        if (tradeAndChangeState && civInfo.isAI()) {
+            WorldMarketAutoSupply.update(civInfo)
             WorldMarketAI.buyFromPlayerOrders(civInfo)
+        }
 
         chooseTechToResearch(civInfo)
         automateCityBombardment(civInfo)

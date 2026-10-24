@@ -10,6 +10,7 @@ import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.mapunit.UnitTurnManager
 import com.unciv.logic.map.tile.Tile
 import com.unciv.logic.trade.TradeEvaluation
+import com.unciv.logic.market.WorldMarketOrders
 import com.unciv.models.ruleset.unique.UniqueTriggerActivation
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.ruleset.unique.endTurn
@@ -42,6 +43,9 @@ class TurnManager(val civInfo: Civilization) {
         civInfo.cache.updateCivResources() // If you offered a trade last turn, this turn it will have been accepted/declined
         for (stockpiledResource in civInfo.getCivResourceSupply().filter { it.resource.isStockpiled })
             civInfo.gainStockpiledResource(stockpiledResource.resource, stockpiledResource.amount)
+
+        // Grand Strategy: reconcile outstanding market sell orders.
+        WorldMarketOrders.reconcileSellerOrders(civInfo)
 
         civInfo.civConstructions.startTurn()
         civInfo.attacksSinceTurnStart.clear()

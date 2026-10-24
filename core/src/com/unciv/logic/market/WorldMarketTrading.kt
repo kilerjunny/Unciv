@@ -40,11 +40,15 @@ object WorldMarketTrading {
         else
             seller.getPerTurnResourcesWithOriginsForTrade()
 
-        return available.any {
-            it.origin == Constants.tradable &&
-            it.resource.name == listing.resource &&
-            it.amount > 0
-        }
+        val availableAmount = available
+            .filter {
+                it.origin == Constants.tradable &&
+                it.resource.name == listing.resource
+            }
+            .sumOf { it.amount }
+
+        return availableAmount >
+            WorldMarketOrders.reservedFor(seller, listing.resource)
     }
 
     fun buyOne(

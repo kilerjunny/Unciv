@@ -5,6 +5,7 @@ import com.unciv.logic.automation.civilization.DiplomacyAutomation
 import com.unciv.logic.automation.civilization.MotivationToAttackAutomation
 import com.unciv.logic.automation.civilization.DeclareWarPlanEvaluator
 import com.unciv.logic.city.City
+import com.unciv.logic.market.WorldMarketOrders
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
 import com.unciv.logic.civilization.diplomacy.DiplomaticModifiers
@@ -23,7 +24,7 @@ import kotlin.math.sqrt
 class TradeEvaluation {
 
     @Readonly
-    fun isTradeValid(trade: Trade, offerer: Civilization, tradePartner: Civilization): Boolean {
+    fun isTradeValid(trade: Trade, offerer: Civilization, tradePartner: Civilization, marketOrderId: String? = null): Boolean {
 
         // Edge case time! Guess what happens if you offer a peace agreement to the AI for all their cities except for the capital,
         // and then capture their capital THAT SAME TURN? It can agree, leading to the civilization getting instantly destroyed!
@@ -52,24 +53,28 @@ class TradeEvaluation {
             return false
 
         for (offer in trade.ourOffers)
-            if (!isOfferValid(offer, offerer, tradePartner)) {
+            if (!isOfferValid(offer, offerer, tradePartner, marketOrderId)) {
                 return false
             }            
 
         for (offer in trade.theirOffers)
-            if (!isOfferValid(offer, tradePartner, offerer)) {
+            if (!isOfferValid(offer, tradePartner, offerer, marketOrderId)) {
                 return false
             }
         return true
     }
 
     @Readonly
-    private fun isOfferValid(tradeOffer: TradeOffer, offerer: Civilization, tradePartner: Civilization): Boolean {
+    private fun isOfferValid(tradeOffer: TradeOffer, offerer: Civilization, tradePartner: Civilization, marketOrderId: String?): Boolean {
 
         @Readonly
         fun hasResource(tradeOffer: TradeOffer): Boolean {
             val resourcesByName = offerer.getCivResourcesByName()
-            return resourcesByName.containsKey(tradeOffer.name) && resourcesByName[tradeOffer.name]!! >= tradeOffer.amount
+            val amount = resourcesByName[tradeOffer.name] ?: 0
+            val reserved = WorldMarketOrders.reservedFor(
+                offerer, tradeOffer.name, marketOrderId
+            )
+            return amount - reserved >= tradeOffer.amount
         }
 
         return when (tradeOffer.type) {

@@ -2,6 +2,7 @@ package com.unciv.logic.trade
 
 import com.unciv.Constants
 import com.unciv.logic.city.managers.SpyFleeReason
+import com.unciv.logic.market.WorldMarketOrders
 import com.unciv.logic.civilization.AlertType
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.PopupAlert
@@ -63,11 +64,19 @@ class TradeLogic(val ourCivilization: Civilization, val otherCivilization: Civil
         ) {
             val resourceTradeOfferType = if (entry.resource.resourceType == ResourceType.Luxury) TradeOfferType.Luxury_Resource
             else TradeOfferType.Strategic_Resource
-            offers.add(TradeOffer(entry.resource.name, resourceTradeOfferType, entry.amount, speed = civInfo.gameInfo.speed))
+            val freeAmount = (entry.amount -
+                WorldMarketOrders.reservedFor(civInfo, entry.resource.name))
+                .coerceAtLeast(0)
+            if (freeAmount > 0)
+                offers.add(TradeOffer(entry.resource.name, resourceTradeOfferType, freeAmount, speed = civInfo.gameInfo.speed))
         }
         
         for (entry in civInfo.getStockpiledResourcesForTrade()){
-            offers.add(TradeOffer(entry.resource.name, TradeOfferType.Stockpiled_Resource, entry.amount, speed = civInfo.gameInfo.speed))
+            val freeAmount = (entry.amount -
+                WorldMarketOrders.reservedFor(civInfo, entry.resource.name))
+                .coerceAtLeast(0)
+            if (freeAmount > 0)
+                offers.add(TradeOffer(entry.resource.name, TradeOfferType.Stockpiled_Resource, freeAmount, speed = civInfo.gameInfo.speed))
         }
 
         offers.add(TradeOffer(Constants.flatGold, TradeOfferType.Gold, civInfo.gold, speed = civInfo.gameInfo.speed))

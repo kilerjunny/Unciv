@@ -101,7 +101,7 @@ object WorldMarketAI {
 
             trade.theirOffers.add(resourceOffer)
 
-            if (!evaluation.isTradeValid(trade, buyer, seller))
+            if (!evaluation.isTradeValid(trade, buyer, seller, order.id))
                 continue
 
             // The existing trade system handles gold, resource

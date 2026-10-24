@@ -6,6 +6,7 @@ import com.unciv.Constants
 import com.unciv.GUI
 import com.unciv.logic.market.WorldMarket
 import com.unciv.logic.market.WorldMarketTrading
+import com.unciv.logic.market.WorldMarketOrderPurchase
 import com.unciv.ui.components.extensions.toLabel
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.images.ImageGetter
@@ -81,68 +82,90 @@ class WorldMarketTradeSection(
         val known = buyer.getKnownCivs()
             .map { it.civName }.toSet()
 
-        val listings = WorldMarket.getResourceListings(gameInfo)
-            .filter {
-                it.seller != buyer.civName &&
-                (spectator || it.seller in known)
-            }
 
-        if (listings.isEmpty()) {
-            add("현재 거래 가능한 상품이 없습니다.".toLabel())
+        val orders = gameInfo.worldMarketOrders
+            .filter { order ->
+                if (order.quantity <= 0 || order.unitPrice <= 0)
+                    return@filter false
+
+                val seller = gameInfo.civilizations.firstOrNull {
+                    it.civID == order.sellerCivId
+                } ?: return@filter false
+
+                seller != buyer &&
+                    seller.isAI() &&
+                    !seller.isDefeated() &&
+                    (spectator || seller.civName in known)
+            }
+            .sortedWith(
+                compareBy(
+                    { it.resourceName },
+                    { it.unitPrice },
+                    { it.sellerCivId },
+                    { it.id }
+                )
+            )
+
+        add("시장 등록 상품".toLabel(
+            fontSize = Constants.headingFontSize
+        )).left().growX().row()
+
+        if (orders.isEmpty()) {
+            add("현재 등록된 판매 상품이 없습니다.".toLabel())
                 .left().growX().row()
         }
 
-        for (listing in listings) {
+        for (order in orders) {
             val seller = gameInfo.civilizations.firstOrNull {
-                it.civName == listing.seller
+                it.civID == order.sellerCivId
             } ?: continue
 
-            val price = WorldMarketTrading.unitPrice(listing, buyer)
             val line = Table(BaseScreen.skin)
 
             line.add(
                 ImageGetter.getResourcePortrait(
-                    listing.resource, 32f
+                    order.resourceName, 32f
                 )
             ).size(32f).padRight(5f)
 
-            val owned = buyer.getResourceAmount(
-                listing.resource
-            )
-
+            val owned = buyer.getResourceAmount(order.resourceName)
             val info = Table(BaseScreen.skin)
+
             info.add(
-                "${listing.resource} · ${listing.seller}"
+                "${order.resourceName} · ${seller.civName}"
                     .toLabel(hideIcons = true)
             ).left().row()
 
             info.add(
-                "판매 ${listing.quantity}개 · 내 가용 ${owned}개"
+                "판매 ${order.quantity}개 · 내 가용 ${owned}개"
                     .toLabel()
             ).left().row()
 
             line.add(info).growX().left()
 
-            line.add("${price}G".toLabel()).padRight(6f)
+            line.add("${order.unitPrice}G".toLabel())
+                .padRight(6f)
 
             if (!spectator) {
                 val button = TextButton("구매", BaseScreen.skin)
                 button.isDisabled =
                     !GUI.isAllowedChangeState() ||
-                    !WorldMarketTrading.canBuy(buyer, seller, listing)
+                    !WorldMarketOrderPurchase.canBuy(buyer, order.id)
 
                 button.onClick {
                     message = if (
                         GUI.isAllowedChangeState() &&
-                        WorldMarketTrading.buyOne(buyer, seller, listing)
+                        WorldMarketOrderPurchase.buy(buyer, order.id)
                     ) {
-                        "${listing.resource} 1개 구매 완료"
+                        "${order.resourceName} 1개 구매 완료"
                     } else {
                         "구매 불가: 금액·재고·외교 관계 확인"
                     }
+
                     render()
                     parentTab.overviewScreen.resizePage(parentTab)
                 }
+
                 line.add(button).width(80f)
             }
 
