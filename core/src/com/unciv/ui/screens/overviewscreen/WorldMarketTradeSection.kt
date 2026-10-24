@@ -73,7 +73,6 @@ class WorldMarketTradeSection(
         if (!spectator) {
             add(
                 WorldMarketSellSection(playerView) {
-                    render()
                     parentTab.overviewScreen.resizePage(parentTab)
                 }
             ).growX().row()
