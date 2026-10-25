@@ -79,8 +79,9 @@ object NextTurnAutomation {
         }
 
         if (tradeAndChangeState && civInfo.isAI()) {
-            WorldMarketAutoSupply.update(civInfo)
-            WorldMarketAI.buyFromMarketOrders(civInfo)
+            // Performance test: market AI disabled
+            // WorldMarketAutoSupply.update(civInfo)
+            // WorldMarketAI.buyFromMarketOrders(civInfo)
         }
 
         chooseTechToResearch(civInfo)
