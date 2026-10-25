@@ -87,6 +87,7 @@ object WorldMarketTrading {
             )) return false
 
         trade.acceptTrade(applyGifts = false)
+        WorldMarketHistory.record(seller, buyer, resource.name, 1, price)
         return true
     }
 }

@@ -7,6 +7,7 @@ import com.unciv.GUI
 import com.unciv.logic.market.WorldMarket
 import com.unciv.logic.market.WorldMarketTrading
 import com.unciv.logic.market.WorldMarketOrderPurchase
+import com.unciv.logic.market.WorldMarketHistory
 import com.unciv.ui.components.extensions.toLabel
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.images.ImageGetter
@@ -19,6 +20,7 @@ class WorldMarketTradeSection(
 ) : Table(BaseScreen.skin) {
 
     private var expanded = true
+    private var historyOpen = false
     private var message = ""
 
     init {
@@ -61,6 +63,30 @@ class WorldMarketTradeSection(
             add(message.toLabel()).left().growX().row()
 
         if (!expanded) return
+
+        val historyButton = TextButton(if (historyOpen) "시장 보기" else "거래 내역", BaseScreen.skin)
+        historyButton.onClick {
+            historyOpen = !historyOpen
+            render()
+            parentTab.overviewScreen.resizePage(parentTab)
+        }
+        add(historyButton).left().row()
+
+        if (historyOpen) {
+            val game = playerView.getCiv().gameInfo
+            val records = WorldMarketHistory.recent(game)
+            add("최근 세계 시장 거래 ${records.size}건 (최대 100건)".toLabel()).left().row()
+            if (records.isEmpty())
+                add("체결된 거래가 없습니다.".toLabel()).left().row()
+
+            for (it in records) {
+                val seller = game.getCivilizationOrNull(it.sellerCivId)?.civName ?: "알 수 없음"
+                val buyer = game.getCivilizationOrNull(it.buyerCivId)?.civName ?: "알 수 없음"
+                add("턴 ${it.turn}: ${seller} → ${buyer}".toLabel(hideIcons = true)).left().row()
+                add("${it.resourceName} ${it.quantity}개 · ${it.totalGold}G".toLabel(hideIcons = true)).left().row()
+            }
+            return
+        }
 
         add("상품 1개 단위 구매 / 가격은 임시 기준가".toLabel())
             .left().growX().row()

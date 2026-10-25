@@ -13,7 +13,7 @@ import com.unciv.models.ruleset.tile.ResourceType
 object WorldMarketAI {
 
     /** AI buys at most one unit from a player's registered orders per turn. */
-    fun buyFromPlayerOrders(buyer: Civilization) {
+    fun buyFromMarketOrders(buyer: Civilization) {
         if (!buyer.isAI() || buyer.isDefeated()) return
         if (!buyer.isMajorCiv() && !buyer.isCityState) return
 
@@ -33,7 +33,8 @@ object WorldMarketAI {
                 it.civID == order.sellerCivId
             } ?: continue
 
-            if (!seller.isHuman() || seller.isDefeated()) continue
+            if (seller == buyer || seller.isDefeated()) continue
+            if (!seller.isHuman() && !seller.isAI()) continue
             if (!buyer.knows(seller) || !seller.knows(buyer)) continue
             if (buyer.isAtWarWith(seller)) continue
             if (buyer.getDiplomacyManager(seller) == null) continue
@@ -77,6 +78,28 @@ object WorldMarketAI {
                 it.amount > 0
             }) continue
 
+            // Grand Strategy: human market reserve
+            if (seller.isAI()) {
+                val humanAccess = game.civilizations.any { human ->
+                    human.isHuman() && !human.isDefeated() &&
+                    human.knows(seller) && seller.knows(human) &&
+                    !human.isAtWarWith(seller) &&
+                    human.getDiplomacyManager(seller) != null &&
+                    seller.getDiplomacyManager(human) != null
+                }
+
+                if (humanAccess) {
+                    val listed = game.worldMarketOrders
+                        .filter {
+                            it.sellerCivId == seller.civID &&
+                            it.resourceName == order.resourceName
+                        }
+                        .sumOf { it.quantity.coerceAtLeast(0) }
+
+                    if (listed <= 1) continue
+                }
+            }
+
             val tradeLogic = TradeLogic(buyer, seller)
             val trade = tradeLogic.currentTrade
 
@@ -112,6 +135,8 @@ object WorldMarketAI {
             if (order.quantity <= 0) {
                 game.worldMarketOrders.remove(order)
             }
+
+            WorldMarketHistory.record(seller, buyer, resource.name, 1, order.unitPrice)
 
             seller.addNotification(
                 "세계 시장: [${buyer.civName}]이 [${resource.name}] 1개를 구매했습니다. (+${order.unitPrice}G)",

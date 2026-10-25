@@ -110,6 +110,7 @@ object WorldMarketOrderPurchase {
         if (order.quantity <= 0)
             game.worldMarketOrders.remove(order)
 
+        WorldMarketHistory.record(seller, buyer, resource.name, 1, order.unitPrice)
         return true
     }
 }
