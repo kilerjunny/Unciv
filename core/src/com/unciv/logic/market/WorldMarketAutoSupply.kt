@@ -17,18 +17,25 @@ object WorldMarketAutoSupply {
             seller.getStockpiledResourcesForTrade().toList()
         )
 
+        val ordersByResource =
+            WorldMarketOrders.myOrders(seller).groupBy { it.resourceName }
+
+        val amountsByResource = supply
+            .filter { it.origin == Constants.tradable }
+            .groupBy { it.resource.name }
+            .mapValues { (_, items) ->
+                items.sumOf { it.amount }.coerceAtLeast(0)
+            }
+
         val names = (
             supply.map { it.resource.name } +
-            WorldMarketOrders.myOrders(seller).map { it.resourceName }
+            ordersByResource.keys
         ).distinct().sorted()
 
         for (name in names) {
             val resource = game.ruleset.tileResources[name]
 
-            val amount = supply.filter {
-                it.origin == Constants.tradable &&
-                it.resource.name == name
-            }.sumOf { it.amount }.coerceAtLeast(0)
+            val amount = amountsByResource[name] ?: 0
 
             val reserve = when {
                 resource == null -> Int.MAX_VALUE
@@ -41,8 +48,7 @@ object WorldMarketAutoSupply {
             val target = if (reserve == Int.MAX_VALUE) 0
                 else (amount - reserve).coerceIn(0, 3)
 
-            val orders = WorldMarketOrders.myOrders(seller)
-                .filter { it.resourceName == name }
+            val orders = ordersByResource[name].orEmpty()
                 .sortedWith(
                     compareBy<MarketSellOrder> { it.createdTurn }
                         .thenBy { it.id }
