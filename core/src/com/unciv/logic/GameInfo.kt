@@ -12,6 +12,7 @@ import com.unciv.logic.BackwardCompatibility.migrateToTileHistory
 import com.unciv.logic.BackwardCompatibility.removeMissingModReferences
 import com.unciv.logic.GameInfoPreview.Companion.randomGameId
 import com.unciv.logic.automation.Timers.Companion.timeThis
+import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.logic.automation.civilization.BarbarianManager
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.*
@@ -387,6 +388,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
      *  @param shouldGainTime on a multiplayer game, if true, makes the player whose turn is ended recover time to play before risking getting forced to resign, 'false' by default 
      */
     fun nextTurn(progressBar: NextTurnProgress? = null, shouldGainTime: Boolean = false): Unit = timeThis("GameInfo.nextTurn") {
+        GrandStrategyPerf.beginTurn(gameId)
         var player = currentPlayerCiv
         var playerIndex = civilizations.indexOf(player)
 
@@ -500,6 +502,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
 
         // This would belong at the end of TurnManager.startTurn, but needs to come after notifyOfCloseEnemyUnits
         player.notificationCountAtStartTurn = player.notifications.size
+        GrandStrategyPerf.finishTurn(gameId, turns)
     }
 
     private fun updateMinutesBeforeForceResign(player: Civilization, shouldGainTime: Boolean) {

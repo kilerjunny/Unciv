@@ -8,6 +8,7 @@ import com.unciv.logic.market.WorldMarket
 import com.unciv.logic.market.WorldMarketTrading
 import com.unciv.logic.market.WorldMarketOrderPurchase
 import com.unciv.logic.market.WorldMarketHistory
+import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.ui.components.extensions.toLabel
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.images.ImageGetter
@@ -21,6 +22,7 @@ class WorldMarketTradeSection(
 
     private var expanded = true
     private var historyOpen = false
+    private var performanceOpen = false
     private var message = ""
 
     init {
@@ -67,10 +69,31 @@ class WorldMarketTradeSection(
         val historyButton = TextButton(if (historyOpen) "시장 보기" else "거래 내역", BaseScreen.skin)
         historyButton.onClick {
             historyOpen = !historyOpen
+            if (historyOpen) performanceOpen = false
             render()
             parentTab.overviewScreen.resizePage(parentTab)
         }
         add(historyButton).left().row()
+
+        val perfButton = TextButton(
+            if (performanceOpen) "시장 보기" else "성능 진단",
+            BaseScreen.skin
+        )
+        perfButton.onClick {
+            performanceOpen = !performanceOpen
+            if (performanceOpen) historyOpen = false
+            render()
+            parentTab.overviewScreen.resizePage(parentTab)
+        }
+        add(perfButton).left().row()
+
+        if (performanceOpen) {
+            val gameId = playerView.getCiv().gameInfo.gameId
+            for (line in GrandStrategyPerf.reportLines(gameId)) {
+                add(line.toLabel(hideIcons = true)).left().row()
+            }
+            return
+        }
 
         if (historyOpen) {
             val game = playerView.getCiv().gameInfo

@@ -16,6 +16,7 @@ import com.unciv.logic.civilization.NotificationIcon
 import com.unciv.logic.civilization.PopupAlert
 import com.unciv.logic.civilization.diplomacy.*
 import com.unciv.logic.market.WorldMarketAI
+import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.logic.market.WorldMarketAutoSupply
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
@@ -46,7 +47,7 @@ object NextTurnAutomation {
 
         val civView = GameView(civInfo.gameInfo, civInfo).civView
         // v0.9: calculate a strategic priority without changing existing AI behavior.
-        if (tradeAndChangeState && civInfo.isMajorCiv()) GrandStrategyAI.assess(civInfo)
+        if (tradeAndChangeState && civInfo.isMajorCiv()) GrandStrategyPerf.measure("strategy") { GrandStrategyAI.assess(civInfo) }
 
         respondToPopupAlerts(civInfo)
         TradeAutomation.respondToTradeRequests(civInfo, tradeAndChangeState)
@@ -79,8 +80,12 @@ object NextTurnAutomation {
         }
 
         if (tradeAndChangeState && civInfo.isAI()) {
-            WorldMarketAutoSupply.update(civInfo)
-            WorldMarketAI.buyFromMarketOrders(civInfo)
+            GrandStrategyPerf.measure("market_supply") {
+                WorldMarketAutoSupply.update(civInfo)
+            }
+            GrandStrategyPerf.measure("market_purchase") {
+                WorldMarketAI.buyFromMarketOrders(civInfo)
+            }
         }
 
         chooseTechToResearch(civInfo)
@@ -90,7 +95,9 @@ object NextTurnAutomation {
             protectCityStates(civInfo)
             bullyCityStates(civInfo)
         }
-        automateUnits(civInfo)  // this is the most expensive part
+        GrandStrategyPerf.measure("units") {
+            automateUnits(civInfo)
+        }
 
         if (tradeAndChangeState && civInfo.isMajorCiv()) {
             if (civView.isReligionEnabled()) {
@@ -103,7 +110,9 @@ object NextTurnAutomation {
             }
         }
 
-        automateCities(civInfo)  // second most expensive
+        GrandStrategyPerf.measure("cities") {
+            automateCities(civInfo)
+        }
         if (tradeAndChangeState) trainSettler(civInfo)
         // I'm not sure what will happen if we *don't* vote when we can, so automate vote even when forced automation
         tryVoteForDiplomaticVictory(civInfo)
