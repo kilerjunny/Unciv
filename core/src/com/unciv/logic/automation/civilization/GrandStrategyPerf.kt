@@ -87,7 +87,7 @@ object GrandStrategyPerf {
         for ((label, key) in groups) {
             val ns = result.durations[key] ?: 0L
             val count = result.counts[key] ?: 0
-            lines.add("$label: ${ms(ns)} ms ($count회)")
+            lines.add("$label: ${ms(ns)} ms (${count}회)")
         }
 
         val measured = result.durations.values.sum()
