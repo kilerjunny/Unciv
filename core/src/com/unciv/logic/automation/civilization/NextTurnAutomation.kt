@@ -91,7 +91,8 @@ object NextTurnAutomation {
             protectCityStates(civInfo)
             bullyCityStates(civInfo)
         }
-        automateUnits(civInfo)  // this is the most expensive part
+        // Performance diagnostic: AI unit moves disabled
+        // automateUnits(civInfo)  // this is the most expensive part
 
         if (tradeAndChangeState && civInfo.isMajorCiv()) {
             if (civView.isReligionEnabled()) {
