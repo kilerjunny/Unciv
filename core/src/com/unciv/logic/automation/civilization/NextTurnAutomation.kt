@@ -95,7 +95,7 @@ object NextTurnAutomation {
             protectCityStates(civInfo)
             bullyCityStates(civInfo)
         }
-        GrandStrategyPerf.measure("units") {
+        GrandStrategyPerf.measureUnitPhase {
             automateUnits(civInfo)
         }
 
@@ -426,6 +426,8 @@ object NextTurnAutomation {
         // capturedBy changes owner on the same object, and an earlier action can do that to a
         // later one, so ownership and destruction are checked at each dispatch, not before the loop.
         val unitsAtStart = civInfo.units.getCivUnits().toList()
+        GrandStrategyPerf.addCount("unit_seen", unitsAtStart.size)
+        GrandStrategyPerf.addCount("unit_military_seen", unitsAtStart.count { it.isMilitary() })
         fun unitsInPriorityOrder() = unitsAtStart.sortedBy { unit -> getUnitPriority(unit, isAtWar) }
 
         val citiesRequiringManualPlacement = civInfo.getKnownCivs().filter { it.isAtWarWith(civInfo) }
@@ -437,27 +439,42 @@ object NextTurnAutomation {
             }
             .toList()
 
-        for (unit in unitsInPriorityOrder()) {
-            if (!isStillOurUnit(unit, civInfo)) continue
-            applyPromotions(unit)
+        GrandStrategyPerf.measure("unit_promotions") {
+            for (unit in unitsInPriorityOrder()) {
+                if (!isStillOurUnit(unit, civInfo)) continue
+                applyPromotions(unit)
+            }
         }
-        for (unit in unitsInPriorityOrder()) {
-            // settlers need to move before automateSettlerEscorting(),
-            // move spaceship parts before that to make sure we're not blocking them
-            if (!unit.hasUnique(UniqueType.SpaceshipPart) && !unit.hasUnique(UniqueType.FoundCity)) continue
-            if (!isStillOurUnit(unit, civInfo)) continue
-            UnitAutomation.automateUnitMoves(unit)
+        GrandStrategyPerf.measure("unit_special_moves") {
+            for (unit in unitsInPriorityOrder()) {
+                // settlers need to move before automateSettlerEscorting(),
+                // move spaceship parts before that to make sure we're not blocking them
+                if (!unit.hasUnique(UniqueType.SpaceshipPart) && !unit.hasUnique(UniqueType.FoundCity)) continue
+                if (!isStillOurUnit(unit, civInfo)) continue
+                UnitAutomation.automateUnitMoves(unit)
+            }
         }
 
-        if (civInfo.cities.isNotEmpty()) automateSettlerEscorting(civInfo)
+        GrandStrategyPerf.measure("unit_escort") {
+            if (civInfo.cities.isNotEmpty()) automateSettlerEscorting(civInfo)
+        }
 
-        for (city in citiesRequiringManualPlacement) automateCityConquer(civInfo, city)
+        GrandStrategyPerf.measure("unit_city_assault") {
+            for (city in citiesRequiringManualPlacement) automateCityConquer(civInfo, city)
+        }
 
-        for (unit in unitsInPriorityOrder()) {
-            // spaceship parts and settlers have already moved
-            if (unit.hasUnique(UniqueType.SpaceshipPart) || unit.hasUnique(UniqueType.FoundCity)) continue
-            if (!isStillOurUnit(unit, civInfo)) continue
-            UnitAutomation.automateUnitMoves(unit)
+        GrandStrategyPerf.measure("unit_regular_moves") {
+            for (unit in unitsInPriorityOrder()) {
+                // spaceship parts and settlers have already moved
+                if (unit.hasUnique(UniqueType.SpaceshipPart) || unit.hasUnique(UniqueType.FoundCity)) continue
+                if (!isStillOurUnit(unit, civInfo)) continue
+                val category = when {
+                    unit.isCivilian() -> "unit_civilian"
+                    unit.isNuclearWeapon() || unit.baseUnit.isAirUnit() -> "unit_air"
+                    else -> "unit_military"
+                }
+                GrandStrategyPerf.measure(category) { UnitAutomation.automateUnitMoves(unit) }
+            }
         }
     }
 

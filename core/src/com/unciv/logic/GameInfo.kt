@@ -417,7 +417,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
         //  would skip a turn if an AI civ calls nextTurn
         //  this happens when resigning a multiplayer game)
         if (player.isHuman()) {
-            TurnManager(player).endTurn(progressBar)
+            GrandStrategyPerf.measure("phase_turn_end") { TurnManager(player).endTurn(progressBar) }
             setNextPlayer()
         }
 
@@ -448,10 +448,10 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
         {
 
             // Starting preparations
-            TurnManager(player).startTurn(progressBar)
+            GrandStrategyPerf.measure("phase_turn_start") { TurnManager(player).startTurn(progressBar) }
 
             // Automation done here
-            TurnManager(player).automateTurn()
+            GrandStrategyPerf.measure("phase_ai_total") { TurnManager(player).automateTurn() }
 
             val worldScreen = UncivGame.Current.worldScreen
             // Do we need to break if player won?
@@ -468,7 +468,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
                 worldScreen.autoPlay.stopAutoPlay()
 
             // Clean up
-            TurnManager(player).endTurn(progressBar)
+            GrandStrategyPerf.measure("phase_turn_end") { TurnManager(player).endTurn(progressBar) }
 
             // To the next player
             setNextPlayer()
@@ -483,7 +483,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
         currentPlayerCiv = player
 
         // Starting their turn
-        TurnManager(player).startTurn(progressBar)
+        GrandStrategyPerf.measure("phase_turn_start") { TurnManager(player).startTurn(progressBar) }
 
         // No popups for spectators
         if (currentPlayerCiv.isSpectator())
@@ -502,6 +502,8 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
 
         // This would belong at the end of TurnManager.startTurn, but needs to come after notifyOfCloseEnemyUnits
         player.notificationCountAtStartTurn = player.notifications.size
+        GrandStrategyPerf.setCount("war_civs", civilizations.count { it.isMajorCiv() && it.isAlive() && it.isAtWar() })
+        GrandStrategyPerf.setCount("ai_civs", civilizations.count { it.isAI() && it.isAlive() })
         GrandStrategyPerf.finishTurn(gameId, turns)
     }
 

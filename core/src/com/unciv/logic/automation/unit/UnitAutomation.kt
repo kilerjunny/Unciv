@@ -29,6 +29,7 @@ import com.unciv.view.GameView
 import yairm210.purity.annotations.Readonly
 import com.unciv.logic.automation.Timers.Companion.timeThis
 import com.unciv.logic.automation.civilization.NextTurnAutomation
+import com.unciv.logic.automation.civilization.GrandStrategyPerf
 
 object UnitAutomation {
 
@@ -94,12 +95,12 @@ object UnitAutomation {
         if (BattleHelper.tryDisembarkUnitToAttackPosition(unit)) return
 
         // if there is an attackable unit in the vicinity, attack!
-        if (tryAttacking(unit)) return
+        if (GrandStrategyPerf.measure("unit_attack_scan") { tryAttacking(unit) }) return
 
         if (tryTakeBackCapturedCity(unit)) return
 
         // Focus all units without a specific target on the enemy city closest to one of our cities
-        if (HeadTowardsEnemyCityAutomation.tryHeadTowardsEnemyCity(unit)) return
+        if (GrandStrategyPerf.measure("unit_city_target") { HeadTowardsEnemyCityAutomation.tryHeadTowardsEnemyCity(unit) }) return
 
         if (tryHeadTowardsEncampment(unit)) return
 
@@ -108,7 +109,7 @@ object UnitAutomation {
         if (unit.health < 80 && tryHealUnit(unit)) return
 
         // move towards the closest reasonably attackable enemy unit within 3 turns of movement (and 5 tiles range)
-        if (tryAdvanceTowardsCloseEnemy(unit)) return
+        if (GrandStrategyPerf.measure("unit_attack_advance") { tryAdvanceTowardsCloseEnemy(unit) }) return
 
         if (unit.health < 100 && tryHealUnit(unit)) return
 

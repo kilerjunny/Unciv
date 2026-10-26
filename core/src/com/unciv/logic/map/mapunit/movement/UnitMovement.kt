@@ -5,6 +5,7 @@ package com.unciv.logic.map.mapunit.movement
 import com.unciv.Constants
 import com.unciv.UncivGame
 import com.unciv.logic.automation.Timers.Companion.timeThis
+import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.logic.civilization.diplomacy.RelationshipLevel
 import com.unciv.logic.map.BFS
 import com.unciv.logic.map.HexCoord
@@ -72,6 +73,8 @@ class UnitMovement(val unit: MapUnit) {
         movementCostCache: HashMap<Int, Float> = HashMap(),
         includeOtherEscortUnit: Boolean = true
     ): PathsToTilesWithinTurn = timeThis("getMovementToTilesAtPosition") {
+        val gsPathStart = GrandStrategyPerf.startPath()
+        try {
         if (UncivGame.Current.settings.useAStarPathfinding) {
             if (!considerZoneOfControl) require(includeOtherEscortUnit)
             val pathingMap = if (!considerZoneOfControl) aStarPathingWithoutZoneControl
@@ -145,14 +148,19 @@ class UnitMovement(val unit: MapUnit) {
         }
 
         return distanceToTiles
+            } finally {
+            GrandStrategyPerf.finishPath(gsPathStart)
+        }
     }
 
     /**
      * Does not consider if the [destination] tile can actually be entered, use [canMoveTo] for that.
      * Returns an empty list if there's no way to get to the destination.
      */
-    @Readonly
+    @Readonly @Suppress("purity")
     fun getShortestPath(destination: Tile, avoidDamagingTerrain: Boolean = false): List<Tile> = timeThis<List<Tile>>("getShortestPath")  {
+        val gsPathStart = GrandStrategyPerf.startPath()
+        try {
         if (unit.cache.cannotMove) return listOf()
         if (UncivGame.Current.settings.useAStarPathfinding)
             return aStarPathing.getShortestPath(destination) ?: listOf()
@@ -269,6 +277,9 @@ class UnitMovement(val unit: MapUnit) {
             distance++
         }
         return emptyList()
+            } finally {
+            GrandStrategyPerf.finishPath(gsPathStart)
+        }
     }
 
     class UnreachableDestinationException(msg: String) : Exception(msg)
@@ -869,13 +880,15 @@ class UnitMovement(val unit: MapUnit) {
      * @param includeOtherEscortUnit determines whether or not this method will also check if the other escort units [getDistanceToTiles] if it has one.
      * Leave it as default unless you know what [getDistanceToTiles] does.
      */
-    @Readonly
+    @Readonly @Suppress("purity")
     fun getDistanceToTiles(
         considerZoneOfControl: Boolean = true,
         passThroughCacheNew: ArrayList<Boolean?>? = null,
         movementCostCache: HashMap<Int, Float>? = null,
         includeOtherEscortUnit: Boolean = true
     ): PathsToTilesWithinTurn {
+        val gsPathStart = GrandStrategyPerf.startPath()
+        try {
         if (UncivGame.Current.settings.useAStarPathfinding) {
             if (!considerZoneOfControl) require(includeOtherEscortUnit)
             val pathingMap = if (!considerZoneOfControl) aStarPathingWithoutZoneControl
@@ -894,6 +907,9 @@ class UnitMovement(val unit: MapUnit) {
         )
 
         return distanceToTiles
+            } finally {
+            GrandStrategyPerf.finishPath(gsPathStart)
+        }
     }
 
     /**

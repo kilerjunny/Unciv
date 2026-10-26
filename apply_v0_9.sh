@@ -2,7 +2,7 @@
 set -euo pipefail
 cd /workspaces/Unciv
 [ "$(git branch --show-current)" = "grand-strategy-formations" ] || { echo 'Switch to grand-strategy-formations first'; exit 1; }
-[ -z "$(git status --porcelain)" ] || { echo 'Uncommitted changes found; stop'; exit 1; }
+[ -z "$(git status --porcelain --untracked-files=no -- . ":(exclude)apply_v0_9.sh")" ] || { echo "Uncommitted changes found; stop"; exit 1; }
 python3 - <<'PY'
 from pathlib import Path
 folder=Path('core/src/com/unciv/logic/automation/civilization')
