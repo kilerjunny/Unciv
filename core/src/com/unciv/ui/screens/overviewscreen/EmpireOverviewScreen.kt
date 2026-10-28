@@ -27,6 +27,10 @@ class EmpireOverviewScreen(
 
     internal val persistState by game.settings::overview
 
+    // Stable tab keys: use the Korean caption for the custom Formations tab.
+    private fun tabCaption(category: EmpireOverviewCategories): String =
+        if (category == EmpireOverviewCategories.Formations) "편제" else category.name
+
     override fun dispose() {
         tabbedPager.selectPage(-1)
         super.dispose()
@@ -52,7 +56,7 @@ class EmpireOverviewScreen(
             pageObject.pad(10f, 0f, 10f, 0f)
             pageObjects[category] = pageObject
             val index = tabbedPager.addPage(
-                caption = category.name,
+                caption = tabCaption(category),
                 content = pageObject,
                 icon, iconSize,
                 disabled = tabState != EmpireOverviewTabState.Normal,
@@ -82,11 +86,11 @@ class EmpireOverviewScreen(
 
     fun resizePage(tab: EmpireOverviewTab) {
         val category = (pageObjects.entries.find { it.value == tab } ?: return).key
-        tabbedPager.replacePage(category.name, tab)
+        tabbedPager.replacePage(tabCaption(category), tab)
     }
 
     fun select(category: EmpireOverviewCategories, selection: String) {
-        tabbedPager.selectPage(category.name)
+        tabbedPager.selectPage(tabCaption(category))
         select(pageObjects[category], selection)
     }
     private fun select(tab: EmpireOverviewTab?, selection: String) {

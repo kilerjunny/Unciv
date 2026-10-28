@@ -24,6 +24,7 @@ import com.unciv.logic.market.MarketSellOrder
 import com.unciv.logic.market.MilitaryMarket
 import com.unciv.logic.market.MilitaryMarketContract
 import com.unciv.logic.market.MilitaryMarketHistoryEntry
+import com.unciv.logic.market.MilitaryMarketListing
 import com.unciv.logic.market.MarketTradeRecord
 import com.unciv.logic.map.MapShape
 import com.unciv.logic.map.TileMap
@@ -114,6 +115,8 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     var worldMarketHistory = ArrayList<MarketTradeRecord>()
     var militaryMarketContracts = ArrayList<MilitaryMarketContract>()
     var militaryMarketHistory = ArrayList<MilitaryMarketHistoryEntry>()
+    var militaryMarketListings = ArrayList<MilitaryMarketListing>()
+    var militaryMarketAILastOrderTurn = HashMap<String, Int>()
     var barbarians = BarbarianManager()
     var religions: HashMap<String, Religion> = hashMapOf()
     var difficulty = "Chieftain" // difficulty is game-wide, think what would happen if 2 human players could play on different difficulties?
@@ -216,6 +219,8 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
         toReturn.worldMarketHistory.addAll(worldMarketHistory.takeLast(100).map { it.copy() })
         toReturn.militaryMarketContracts.addAll(militaryMarketContracts.map { it.copy() })
         toReturn.militaryMarketHistory.addAll(militaryMarketHistory.takeLast(100).map { it.copy() })
+        toReturn.militaryMarketListings.addAll(militaryMarketListings.map { it.copy() })
+        toReturn.militaryMarketAILastOrderTurn.putAll(militaryMarketAILastOrderTurn)
         toReturn.barbarians = barbarians.clone()
         toReturn.religions.putAll(religions.asSequence().map { it.key to it.value.clone() })
         toReturn.currentPlayer = currentPlayer

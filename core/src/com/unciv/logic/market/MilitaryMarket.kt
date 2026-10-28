@@ -10,22 +10,15 @@ import com.unciv.models.ruleset.unit.BaseUnit
 import java.util.UUID
 import yairm210.purity.annotations.Readonly
 
-/**
- * Military procurement with two explicit handover stages.
- * Actual city production produces an ACTUAL unit at the seller's city.
- * The seller releases it (인도하기); the buyer then accepts ownership (인도받기).
- * The same physical unit remains at the production tile, with no teleportation.
- *
- * Phase 1: the player buys from AI sellers, which approve handover automatically.
- * Seller-side manual handover is exposed for future player-seller contracts.
- */
+/** Build-to-order unit trading: seller produces, seller releases, buyer takes the same unit. */
 object MilitaryMarket {
-
     const val PRODUCING = "PRODUCING"
     const val AWAITING_DISPATCH = "AWAITING_DISPATCH"
     const val AWAITING_RECEIPT = "AWAITING_RECEIPT"
 
-    /** Prevent AI moving a completed contract unit until the buyer receives it. */
+    data class Offer(val sellerId: String, val cityId: String, val unitName: String, val price: Int)
+
+    /** AI must not move or attack units reserved for a paid contract. */
     @Readonly
     fun isReservedUnit(unit: MapUnit): Boolean =
         unit.civ.gameInfo.militaryMarketContracts.any {
@@ -33,11 +26,11 @@ object MilitaryMarket {
                 it.status != PRODUCING && it.producedUnitId == unit.id
         }
 
-    data class Offer(val sellerId: String, val cityId: String, val unitName: String, val price: Int)
-
-    private fun sellerFor(buyer: Civilization, seller: Civilization): Boolean =
-        buyer != seller && buyer.isHuman() && seller.isAI() &&
-            seller.isMajorCiv() && !buyer.isDefeated() && !seller.isDefeated() &&
+    private fun tradingPartners(buyer: Civilization, seller: Civilization): Boolean =
+        buyer != seller && (buyer.isHuman() || buyer.isAI()) &&
+            (seller.isHuman() || seller.isAI()) &&
+            buyer.isMajorCiv() && seller.isMajorCiv() &&
+            !buyer.isDefeated() && !seller.isDefeated() &&
             buyer.knows(seller) && seller.knows(buyer) &&
             !buyer.isAtWarWith(seller) &&
             buyer.getDiplomacyManager(seller) != null &&
@@ -50,54 +43,116 @@ object MilitaryMarket {
                 it.sellerCityId == city.id && it.sellerCivId == city.civ.civID
             }
 
-    private fun price(seller: Civilization, city: City, unit: BaseUnit): Int =
+    fun referencePrice(seller: Civilization, city: City, unit: BaseUnit): Int =
         (unit.getProductionCost(seller, city).toLong() * 3L)
             .coerceIn(60L, 100000L).toInt()
 
-    /** Advertise only when the market UI opens, not during each rendered frame. */
-    fun offersFor(buyer: Civilization): List<Offer> {
-        if (!buyer.isHuman() || buyer.isDefeated() || buyer.cities.isEmpty()) return emptyList()
-        return buyer.gameInfo.civilizations.asSequence()
-            .filter { sellerFor(buyer, it) }
-            .mapNotNull { seller ->
-                seller.cities.filter { eligibleCity(it) }
-                    .maxByOrNull { it.cityStats.currentCityStats.production }
-                    ?.let { seller to it }
-            }
-            .flatMap { (seller, city) ->
-                city.cityConstructions.getConstructableUnits()
-                    .filter { it.isMilitary && !it.isGreatPerson }
-                    .map { unit -> Offer(seller.civID, city.id, unit.name, price(seller, city, unit)) }
-            }
-            .sortedWith(compareBy<Offer> { it.sellerId }.thenBy { it.price }.thenBy { it.unitName })
-            .take(100).toList()
+    fun myListings(civ: Civilization): List<MilitaryMarketListing> =
+        civ.gameInfo.militaryMarketListings.filter { it.sellerCivId == civ.civID }
+
+    /** One offer per city, fixed server-side price; no prebuilt units or inventory needed. */
+    fun listForSale(seller: Civilization, cityId: String, unitName: String): Boolean {
+        if (!seller.isHuman() || seller.isDefeated() || !seller.isMajorCiv()) return false
+        val game = seller.gameInfo
+        val city = seller.cities.firstOrNull { it.id == cityId } ?: return false
+        val unit = game.ruleset.units[unitName] ?: return false
+        if (!eligibleCity(city) || !unit.isMilitary || unit.isGreatPerson ||
+            !city.cityConstructions.canAddToQueue(unit) ||
+            city.cityConstructions.getConstructableUnits().none { it.name == unitName } ||
+            game.militaryMarketListings.any { it.sellerCityId == cityId && it.sellerCivId == seller.civID }
+        ) return false
+
+        game.militaryMarketListings.add(MilitaryMarketListing(
+            UUID.randomUUID().toString(), seller.civID, city.id, unit.name,
+            referencePrice(seller, city, unit), game.turns
+        ))
+        return true
     }
 
+    fun withdrawListing(seller: Civilization, listingId: String): Boolean {
+        if (!seller.isHuman()) return false
+        val listing = seller.gameInfo.militaryMarketListings.firstOrNull {
+            it.id == listingId && it.sellerCivId == seller.civID
+        } ?: return false
+        return seller.gameInfo.militaryMarketListings.remove(listing)
+    }
+
+    /** AI sellers display their buildable units automatically, player sellers only their listings. */
+    fun offersFor(buyer: Civilization, limit: Int = 100): List<Offer> {
+        if (buyer.isDefeated() || buyer.cities.isEmpty() || !buyer.isMajorCiv()) return emptyList()
+        val game = buyer.gameInfo
+        val results = ArrayList<Offer>()
+
+        // Prioritize player-created listings so they are visible even in large AI worlds.
+        for (listing in game.militaryMarketListings) {
+            val seller = game.getCivilizationOrNull(listing.sellerCivId) ?: continue
+            if (!seller.isHuman() || !tradingPartners(buyer, seller)) continue
+            val city = seller.cities.firstOrNull { it.id == listing.sellerCityId } ?: continue
+            val unit = game.ruleset.units[listing.unitName] ?: continue
+            if (!eligibleCity(city) || !unit.isMilitary || unit.isGreatPerson ||
+                !city.cityConstructions.canAddToQueue(unit)) continue
+            results.add(Offer(seller.civID, city.id, unit.name, listing.price))
+            if (results.size >= limit) return results
+        }
+
+        // AI sellers don't need serialized offer objects, preventing save-file bloat.
+        for (seller in game.civilizations) {
+            if (!seller.isAI() || !tradingPartners(buyer, seller)) continue
+            val city = seller.cities.asSequence()
+                .filter { eligibleCity(it) }
+                .maxByOrNull { it.cityStats.currentCityStats.production } ?: continue
+            for (unit in city.cityConstructions.getConstructableUnits()) {
+                if (!unit.isMilitary || unit.isGreatPerson) continue
+                results.add(Offer(seller.civID, city.id, unit.name,
+                    referencePrice(seller, city, unit)))
+                if (results.size >= limit) return results
+            }
+        }
+        return results
+    }
+
+    /** Recheck every offer at the moment of buying, never trust UI or cached prices. */
     fun order(buyer: Civilization, offer: Offer): Boolean {
         val game = buyer.gameInfo
         val seller = game.getCivilizationOrNull(offer.sellerId) ?: return false
-        if (!sellerFor(buyer, seller)) return false
+        if (!tradingPartners(buyer, seller)) return false
         val city = seller.cities.firstOrNull { it.id == offer.cityId } ?: return false
         if (!eligibleCity(city)) return false
         val unit = game.ruleset.units[offer.unitName] ?: return false
-        if (!unit.isMilitary || unit.isGreatPerson || !city.cityConstructions.canAddToQueue(unit)) return false
-        if (city.cityConstructions.getConstructableUnits().none { it.name == unit.name }) return false
+        if (!unit.isMilitary || unit.isGreatPerson ||
+            !city.cityConstructions.canAddToQueue(unit) ||
+            city.cityConstructions.getConstructableUnits().none { it.name == unit.name } ||
+            // A pre-existing queue entry with the same name makes attribution ambiguous.
+            city.cityConstructions.constructionQueue.contains(unit.name)
+        ) return false
 
-        val goldPrice = price(seller, city, unit)
-        if (goldPrice <= 0 || buyer.gold < goldPrice) return false
+        val listing = if (seller.isHuman()) game.militaryMarketListings.firstOrNull {
+            it.sellerCivId == seller.civID && it.sellerCityId == city.id &&
+                it.unitName == unit.name
+        } ?: return false else null
+        val price = listing?.price ?: referencePrice(seller, city, unit)
+        if (price <= 0 || buyer.gold < price || game.militaryMarketContracts.size >= 40) return false
 
         val before = city.cityConstructions.constructionQueue.count { it == unit.name }
         city.cityConstructions.addToQueue(unit, addToTop = true)
         if (city.cityConstructions.constructionQueue.count { it == unit.name } != before + 1) return false
 
-        buyer.addGold(-goldPrice)
+        buyer.addGold(-price)
         game.militaryMarketContracts.add(MilitaryMarketContract(
             UUID.randomUUID().toString(), seller.civID, city.id,
-            buyer.civID, unit.name, goldPrice, game.turns
+            buyer.civID, unit.name, price, game.turns
         ))
-        buyer.addNotification(
-            "군수 시장: [${seller.civName}]에 [${unit.name}] 발주 (-${goldPrice}G 예치)",
+        // A city cannot service several simultaneous custom-production orders.
+        game.militaryMarketListings.removeAll {
+            it.sellerCivId == seller.civID && it.sellerCityId == city.id
+        }
+        if (buyer.isHuman()) buyer.addNotification(
+            "군수 시장: [${seller.civName}]에 [${unit.name}] 발주 (-${price}G 예치)",
             NotificationCategory.Trade, NotificationIcon.Trade, seller.civName
+        )
+        if (seller.isHuman()) seller.addNotification(
+            "군수 시장: [${buyer.civName}]의 [${unit.name}] 주문이 접수되었습니다.",
+            NotificationCategory.Trade, NotificationIcon.Trade, buyer.civName
         )
         return true
     }
@@ -124,28 +179,26 @@ object MilitaryMarket {
         }
     }
 
-    /** Called AFTER city construction successfully creates its unit. */
     fun onProduced(city: City, producedUnit: MapUnit) {
         val game = city.civ.gameInfo
         val contract = game.militaryMarketContracts.firstOrNull {
             it.status == PRODUCING && it.sellerCivId == city.civ.civID &&
                 it.sellerCityId == city.id && it.unitName == producedUnit.baseUnit.name
         } ?: return
-
         contract.producedUnitId = producedUnit.id
         contract.status = AWAITING_DISPATCH
-
-        val buyer = game.getCivilizationOrNull(contract.buyerCivId)
-        buyer?.addNotification(
-            "군수 시장: [${contract.unitName}] 생산 완료. 판매국의 인도를 기다립니다.",
+        game.getCivilizationOrNull(contract.buyerCivId)?.takeIf { it.isHuman() }?.addNotification(
+            "군수 시장: [${contract.unitName}] 생산 완료. 판매국 인도 승인을 기다립니다.",
             NotificationCategory.Trade, NotificationIcon.Trade, contract.unitName
         )
-
-        // AI sellers perform their own '인도하기' action automatically, just once.
-        if (city.civ.isAI()) dispatch(city.civ, contract.id)
+        if (city.civ.isHuman()) city.civ.addNotification(
+            "군수 시장: [${contract.unitName}] 생산 완료. 거래 탭에서 인도하기를 선택하세요.",
+            NotificationCategory.Trade, NotificationIcon.Trade, contract.unitName
+        )
+        else dispatch(city.civ, contract.id)
     }
 
-    /** Seller's explicit release. No ownership transfer at this stage. */
+    /** Seller accepts handover first; retains the unit until buyer takes it. */
     fun dispatch(seller: Civilization, contractId: String): Boolean {
         val game = seller.gameInfo
         val contract = game.militaryMarketContracts.firstOrNull {
@@ -154,14 +207,13 @@ object MilitaryMarket {
         } ?: return false
         if (seller.isDefeated() || producedUnit(game, contract) == null) return false
         contract.status = AWAITING_RECEIPT
-        game.getCivilizationOrNull(contract.buyerCivId)?.addNotification(
-            "군수 시장: [${seller.civName}]이 [${contract.unitName}] 인도를 승인했습니다. 군수 시장에서 인도받기를 선택하세요.",
+        game.getCivilizationOrNull(contract.buyerCivId)?.takeIf { it.isHuman() }?.addNotification(
+            "군수 시장: [${seller.civName}]이 [${contract.unitName}] 인도를 승인했습니다. 인도받기를 선택하세요.",
             NotificationCategory.Trade, NotificationIcon.Trade, contract.unitName
         )
         return true
     }
 
-    /** Do not move ownership to an inaccessible tile. Keep the unit at the producer's base. */
     fun canReceive(buyer: Civilization, contract: MilitaryMarketContract): Boolean {
         if (buyer.civID != contract.buyerCivId || contract.status != AWAITING_RECEIPT ||
             buyer.isDefeated() || buyer.cities.isEmpty()) return false
@@ -169,21 +221,17 @@ object MilitaryMarket {
         val seller = game.getCivilizationOrNull(contract.sellerCivId) ?: return false
         if (seller.isDefeated() || buyer.isAtWarWith(seller) ||
             !buyer.knows(seller) || !seller.knows(buyer)) return false
-
         val unit = producedUnit(game, contract) ?: return false
         if (unit.isTransported || unit.isEscorting()) return false
         val tile = unit.getTile()
         val owner = tile.getOwner()
-        // A foreign city/land without passage permission must not strand the unit.
         if (owner != null && owner != buyer &&
             !buyer.diplomacyFunctions.canPassThroughTiles(owner)) return false
         if (unit.baseUnit.isWaterUnit && tile.isLand && !tile.isCityCenter()) return false
-        // Avoid ending up with a buyer land unit on ocean without embark capability.
         if (unit.baseUnit.isLandUnit && tile.isWater && !buyer.tech.unitsCanEmbark) return false
         return true
     }
 
-    /** Buyer's explicit acceptance; physically retains the original producer tile and unit ID. */
     fun receive(buyer: Civilization, contractId: String): Boolean {
         val game = buyer.gameInfo
         val contract = game.militaryMarketContracts.firstOrNull {
@@ -192,27 +240,33 @@ object MilitaryMarket {
         if (!canReceive(buyer, contract)) return false
         val seller = game.getCivilizationOrNull(contract.sellerCivId) ?: return false
         val unit = producedUnit(game, contract) ?: return false
-
         val origin = unit.getTile()
-        unit.gift(buyer) // Existing engine ownership transfer, not a newly spawned unit.
-        unit.currentMovement = 0f // Buyer can depart from seller's production tile next turn.
+        unit.gift(buyer) // Transfer SAME unit without spawning or teleporting.
+        unit.currentMovement = 0f
         seller.addGold(contract.price)
         game.militaryMarketContracts.remove(contract)
         log(game, contract, "인도 완료")
-
-        buyer.addNotification(
-            "군수 시장: [${contract.unitName}] 인도받기 완료. 생산기지에서 출발하세요.",
+        if (buyer.isHuman()) buyer.addNotification(
+            "군수 시장: [${contract.unitName}] 인도 완료. 생산기지에서 출발하세요.",
             origin.position, NotificationCategory.Trade, NotificationIcon.Trade, contract.unitName
         )
-        seller.addNotification(
+        if (seller.isHuman()) seller.addNotification(
             "군수 시장: [${contract.unitName}] 인도 완료 (+${contract.price}G)",
             NotificationCategory.Trade, NotificationIcon.Trade, contract.unitName
         )
         return true
     }
 
-    /** Check queue only during production; after completion the produced unit is authoritative. */
+    /** Reconcile once per game turn; auto-dismiss invalid deals and stale public listings. */
     fun reconcile(game: GameInfo) {
+        game.militaryMarketListings.removeAll { listing ->
+            val seller = game.getCivilizationOrNull(listing.sellerCivId)
+            val city = seller?.cities?.firstOrNull { it.id == listing.sellerCityId }
+            val unit = game.ruleset.units[listing.unitName]
+            seller == null || !seller.isHuman() || seller.isDefeated() || city == null ||
+                unit == null || !unit.isMilitary || !eligibleCity(city) ||
+                !city.cityConstructions.canAddToQueue(unit)
+        }
         for (contract in game.militaryMarketContracts.toList()) {
             val seller = game.getCivilizationOrNull(contract.sellerCivId)
             val buyer = game.getCivilizationOrNull(contract.buyerCivId)
@@ -228,7 +282,7 @@ object MilitaryMarket {
         }
     }
 
-    /** Only unproduced orders can be cancelled unilaterally. */
+    /** Unbuilt orders are cancellable by the buyer with a full refund. */
     fun cancel(buyer: Civilization, contractId: String): Boolean {
         val game = buyer.gameInfo
         val contract = game.militaryMarketContracts.firstOrNull {
@@ -255,12 +309,12 @@ object MilitaryMarket {
         if (!game.militaryMarketContracts.remove(contract)) return
         game.getCivilizationOrNull(contract.buyerCivId)?.let { buyer ->
             buyer.addGold(contract.price)
-            buyer.addNotification(
+            if (buyer.isHuman()) buyer.addNotification(
                 "군수 시장: [${contract.unitName}] 주문이 ${reason}되었습니다. (+${contract.price}G 환불)",
                 NotificationCategory.Trade, NotificationIcon.Trade, contract.unitName
             )
         }
-        // Any already-produced physical unit stays with the producer after refund.
+        // A completed unit not received remains the seller's own unit.
         log(game, contract, "환불")
     }
 }

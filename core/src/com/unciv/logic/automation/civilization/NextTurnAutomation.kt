@@ -17,6 +17,7 @@ import com.unciv.logic.civilization.PopupAlert
 import com.unciv.logic.civilization.diplomacy.*
 import com.unciv.logic.market.WorldMarketAI
 import com.unciv.logic.market.MilitaryMarket
+import com.unciv.logic.market.MilitaryMarketAI
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.logic.market.WorldMarketAutoSupply
 import com.unciv.logic.map.mapunit.MapUnit
@@ -86,6 +87,9 @@ object NextTurnAutomation {
             }
             GrandStrategyPerf.measure("market_purchase") {
                 WorldMarketAI.buyFromMarketOrders(civInfo)
+            }
+            GrandStrategyPerf.measure("military_market") {
+                MilitaryMarketAI.processTurn(civInfo)
             }
         }
 
