@@ -4,9 +4,16 @@ import com.unciv.logic.civilization.Civilization
 
 /** Light AI participation. Called once per AI turn, never per rendered frame. */
 object MilitaryMarketAI {
-    private const val MIN_GOLD_RESERVE = 300
+    private const val MIN_GOLD_RESERVE = 100
     private const val COOLDOWN_TURNS = 12
     private const val MAX_ACTIVE_CONTRACTS = 24
+
+    /** AI avoids spending its entire treasury, but can purchase cheaper equipment. */
+    private fun purchaseBudget(civ: Civilization, atWar: Boolean): Int {
+        val spare = (civ.gold - MIN_GOLD_RESERVE).coerceAtLeast(0)
+        val fraction = if (atWar) civ.gold * 2 / 3 else civ.gold / 2
+        return minOf(spare, fraction)
+    }
 
     fun processTurn(civ: Civilization) {
         if (!civ.isAI() || !civ.isMajorCiv() || civ.isDefeated()) return
@@ -34,8 +41,8 @@ object MilitaryMarketAI {
 
         val atWar = civ.isAtWar()
         val militaryCount = civ.units.getCivUnits().count { it.isMilitary() }
-        if (!atWar && militaryCount >= civ.cities.size * 3) return
-        val budget = if (atWar) civ.gold / 3 else civ.gold / 4
+        if (!atWar && militaryCount >= civ.cities.size * 5) return
+        val budget = purchaseBudget(civ, atWar)
         if (budget <= 0) return
         val hasNavalBase = civ.cities.any { it.isNaval() }
         val candidates = MilitaryMarket.offersFor(civ, limit = 100)
@@ -51,8 +58,10 @@ object MilitaryMarketAI {
                 // Don't rely on AI understanding a force that cannot fight.
                 if (!unit.isMilitary || unit.getForceEvaluation() <= 0) return@mapNotNull null
                 // Prefer player supply if both options are comparable; still allow AI-AI orders.
-                val buyerPreference = if (seller.isHuman()) 5 else 0
-                val score = unit.getForceEvaluation().toDouble() / offer.price * 100 + buyerPreference
+                val buyerPreference = if (seller.isHuman()) 150 else 0
+                // Civilisation-unique units are tradable, even if the buyer cannot train them.
+                val uniqueBonus = if (unit.uniqueTo != null || unit.replaces != null) 30 else 0
+                val score = unit.getForceEvaluation().toDouble() / offer.price * 100 + buyerPreference + uniqueBonus
                 score to offer
             }
             .sortedByDescending { it.first }
@@ -64,5 +73,46 @@ object MilitaryMarketAI {
                 return
             }
         }
+    }
+
+    /** Read-only market diagnostics for the human seller; evaluated only when the market UI opens. */
+    fun sellerDemandSummary(seller: Civilization): String {
+        val game = seller.gameInfo
+        val listings = MilitaryMarket.myListings(seller)
+        if (listings.isEmpty()) return "판매 등록 상품이 없습니다."
+        var known = 0
+        var passage = 0
+        var affordable = 0
+        var candidates = 0
+        for (buyer in game.civilizations) {
+            if (!buyer.isAI() || !buyer.isMajorCiv() || buyer.isDefeated() ||
+                buyer.cities.isEmpty() || !buyer.knows(seller) || !seller.knows(buyer) ||
+                buyer.isAtWarWith(seller)) continue
+            known++
+            // This is necessary for ownership transfer at the seller's actual production base.
+            if (!buyer.diplomacyFunctions.canPassThroughTiles(seller)) continue
+            passage++
+            if (buyer.gold <= MIN_GOLD_RESERVE) continue
+            val atWar = buyer.isAtWar()
+            val budget = purchaseBudget(buyer, atWar)
+            if (listings.none { it.price in 1..budget }) continue
+            affordable++
+            if (game.militaryMarketContracts.size >= MAX_ACTIVE_CONTRACTS ||
+                MilitaryMarket.myContracts(buyer).isNotEmpty()) continue
+            val last = game.militaryMarketAILastOrderTurn[buyer.civID] ?: -1000
+            if (game.turns - last < COOLDOWN_TURNS) continue
+            val militaryCount = buyer.units.getCivUnits().count { it.isMilitary() }
+            if (!atWar && militaryCount >= buyer.cities.size * 5) continue
+            val feasible = listings.any { listing ->
+                val city = seller.cities.firstOrNull { it.id == listing.sellerCityId }
+                val unit = game.ruleset.units[listing.unitName]
+                listing.price in 1..budget && city != null && unit != null &&
+                    city.cityConstructions.canAddToQueue(unit) &&
+                    listing.unitName !in city.cityConstructions.constructionQueue
+            }
+            if (feasible) candidates++
+        }
+        return "AI 구매 진단: 외교 가능 ${known}국 · 통행 가능 ${passage}국 · " +
+            "예산 충족 ${affordable}국 · 현재 발주 후보 ${candidates}국"
     }
 }

@@ -101,8 +101,12 @@ object MilitaryMarket {
             val city = seller.cities.asSequence()
                 .filter { eligibleCity(it) }
                 .maxByOrNull { it.cityStats.currentCityStats.production } ?: continue
-            for (unit in city.cityConstructions.getConstructableUnits()) {
-                if (!unit.isMilitary || unit.isGreatPerson) continue
+            // Prioritize the producer civilisation's unique units before the catalogue cap.
+            val buildable = city.cityConstructions.getConstructableUnits()
+                .filter { it.isMilitary && !it.isGreatPerson }
+                .sortedWith(compareByDescending<BaseUnit> { it.uniqueTo != null || it.replaces != null }
+                    .thenBy { it.name })
+            for (unit in buildable) {
                 results.add(Offer(seller.civID, city.id, unit.name,
                     referencePrice(seller, city, unit)))
                 if (results.size >= limit) return results
