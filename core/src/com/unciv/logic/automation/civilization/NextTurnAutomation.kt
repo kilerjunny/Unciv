@@ -16,6 +16,7 @@ import com.unciv.logic.civilization.NotificationIcon
 import com.unciv.logic.civilization.PopupAlert
 import com.unciv.logic.civilization.diplomacy.*
 import com.unciv.logic.market.WorldMarketAI
+import com.unciv.logic.market.MilitaryMarket
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.logic.market.WorldMarketAutoSupply
 import com.unciv.logic.map.mapunit.MapUnit
@@ -428,7 +429,9 @@ object NextTurnAutomation {
         val unitsAtStart = civInfo.units.getCivUnits().toList()
         GrandStrategyPerf.addCount("unit_seen", unitsAtStart.size)
         GrandStrategyPerf.addCount("unit_military_seen", unitsAtStart.count { it.isMilitary() })
-        fun unitsInPriorityOrder() = unitsAtStart.sortedBy { unit -> getUnitPriority(unit, isAtWar) }
+        fun unitsInPriorityOrder() = unitsAtStart
+            .filterNot { MilitaryMarket.isReservedUnit(it) }
+            .sortedBy { unit -> getUnitPriority(unit, isAtWar) }
 
         val citiesRequiringManualPlacement = civInfo.getKnownCivs().filter { it.isAtWarWith(civInfo) }
             .flatMap { it.cities }
@@ -512,7 +515,9 @@ object NextTurnAutomation {
     /** All units will continue after this to the regular automation, so units not moved in this function will still move */
     private fun automateCityConquer(civInfo: Civilization, city: City){
         @Readonly fun ourUnitsInRange(range: Int) = city.getCenterTile().getTilesInDistance(range)
-            .mapNotNull { it.militaryUnit }.filter { it.civ == civInfo && (!it.baseUnit.isMelee() || it.health > 30) }.toList()
+            .mapNotNull { it.militaryUnit }.filter { it.civ == civInfo &&
+                !MilitaryMarket.isReservedUnit(it) &&
+                (!it.baseUnit.isMelee() || it.health > 30) }.toList()
         
         
         fun attackIfPossible(unit: MapUnit, tile: Tile){
@@ -563,6 +568,7 @@ object NextTurnAutomation {
         @Readonly fun bestUnitInRange(tile: Tile, range: Int) = tile.getTilesInDistance(range)
             .mapNotNull { it.militaryUnit }.filter {
                 it.civ == civInfo
+                    && !MilitaryMarket.isReservedUnit(it)
                     && it.health >= 100
                     // only draft a unit from the core of the empire, or it'll interfere with other anti-barb activities
                     && (it.currentTile.aerialDistanceTo(capitalTile) < tile.aerialDistanceTo(capitalTile))

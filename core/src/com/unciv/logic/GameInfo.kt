@@ -21,6 +21,9 @@ import com.unciv.logic.civilization.managers.TurnManager
 import com.unciv.logic.civilization.managers.VictoryManager
 import com.unciv.logic.github.Github.repoNameToFolderName
 import com.unciv.logic.market.MarketSellOrder
+import com.unciv.logic.market.MilitaryMarket
+import com.unciv.logic.market.MilitaryMarketContract
+import com.unciv.logic.market.MilitaryMarketHistoryEntry
 import com.unciv.logic.market.MarketTradeRecord
 import com.unciv.logic.map.MapShape
 import com.unciv.logic.map.TileMap
@@ -109,6 +112,8 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     var civilizations = ArrayList<Civilization>()
     var worldMarketOrders = ArrayList<MarketSellOrder>()
     var worldMarketHistory = ArrayList<MarketTradeRecord>()
+    var militaryMarketContracts = ArrayList<MilitaryMarketContract>()
+    var militaryMarketHistory = ArrayList<MilitaryMarketHistoryEntry>()
     var barbarians = BarbarianManager()
     var religions: HashMap<String, Religion> = hashMapOf()
     var difficulty = "Chieftain" // difficulty is game-wide, think what would happen if 2 human players could play on different difficulties?
@@ -209,6 +214,8 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
             worldMarketOrders.map { it.copy() }
         )
         toReturn.worldMarketHistory.addAll(worldMarketHistory.takeLast(100).map { it.copy() })
+        toReturn.militaryMarketContracts.addAll(militaryMarketContracts.map { it.copy() })
+        toReturn.militaryMarketHistory.addAll(militaryMarketHistory.takeLast(100).map { it.copy() })
         toReturn.barbarians = barbarians.clone()
         toReturn.religions.putAll(religions.asSequence().map { it.key to it.value.clone() })
         toReturn.currentPlayer = currentPlayer
@@ -389,6 +396,7 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
      */
     fun nextTurn(progressBar: NextTurnProgress? = null, shouldGainTime: Boolean = false): Unit = timeThis("GameInfo.nextTurn") {
         GrandStrategyPerf.beginTurn(gameId)
+        MilitaryMarket.reconcile(this)
         var player = currentPlayerCiv
         var playerIndex = civilizations.indexOf(player)
 

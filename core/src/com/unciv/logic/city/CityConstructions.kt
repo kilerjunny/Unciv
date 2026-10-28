@@ -1,5 +1,7 @@
 package com.unciv.logic.city
 
+import com.unciv.logic.market.MilitaryMarket
+
 import com.unciv.GUI
 import com.unciv.UncivGame
 import com.unciv.logic.automation.Timers.Companion.timeThis
@@ -581,6 +583,8 @@ class CityConstructions : IsPartOfGameInfoSerialization {
                     pediaAction, NotificationCategory.General, NotificationIcon.Construction, buildingIcon)
             }
         }
+        // Record the REAL unit produced here, before a purchaser can accept delivery.
+        if (construction is BaseUnit && unit != null) MilitaryMarket.onProduced(city, unit)
         return true
     }
 

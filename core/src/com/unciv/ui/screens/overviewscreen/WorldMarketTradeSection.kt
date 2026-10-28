@@ -23,6 +23,7 @@ class WorldMarketTradeSection(
     private var expanded = true
     private var historyOpen = false
     private var performanceOpen = false
+    private var militaryMarketOpen = false
     private var message = ""
 
     init {
@@ -69,7 +70,7 @@ class WorldMarketTradeSection(
         val historyButton = TextButton(if (historyOpen) "시장 보기" else "거래 내역", BaseScreen.skin)
         historyButton.onClick {
             historyOpen = !historyOpen
-            if (historyOpen) performanceOpen = false
+            if (historyOpen) { performanceOpen = false; militaryMarketOpen = false }
             render()
             parentTab.overviewScreen.resizePage(parentTab)
         }
@@ -81,11 +82,28 @@ class WorldMarketTradeSection(
         )
         perfButton.onClick {
             performanceOpen = !performanceOpen
-            if (performanceOpen) historyOpen = false
+            if (performanceOpen) { historyOpen = false; militaryMarketOpen = false }
             render()
             parentTab.overviewScreen.resizePage(parentTab)
         }
         add(perfButton).left().row()
+
+        val militaryButton = TextButton(
+            if (militaryMarketOpen) "시장 보기" else "군수 시장", BaseScreen.skin
+        )
+        militaryButton.onClick {
+            militaryMarketOpen = !militaryMarketOpen
+            if (militaryMarketOpen) { historyOpen = false; performanceOpen = false }
+            render()
+            parentTab.overviewScreen.resizePage(parentTab)
+        }
+        add(militaryButton).left().row()
+        if (militaryMarketOpen) {
+            add(MilitaryMarketSection(playerView) {
+                parentTab.overviewScreen.resizePage(parentTab)
+            }).growX().row()
+            return
+        }
 
         if (performanceOpen) {
             val gameId = playerView.getCiv().gameInfo.gameId
