@@ -1,5 +1,8 @@
 package com.unciv.ui.screens.overviewscreen
 
+import com.badlogic.gdx.Application
+import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.Input
 import com.badlogic.gdx.scenes.scene2d.ui.Table
 import com.badlogic.gdx.scenes.scene2d.ui.TextField
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton
@@ -239,15 +242,34 @@ class MilitaryMarketSection(
 
         add("다른 국가의 판매 상품".toLabel(fontSize = Constants.headingFontSize)).left().padTop(12f).row()
         val searchBar = Table(BaseScreen.skin)
-        val searchField = TextField(searchQuery, BaseScreen.skin)
-        searchField.messageText = "유닛명 / 국가 / 도시 검색"
-        searchBar.add(searchField).width(260f).padRight(4f)
-        val searchButton = TextButton("검색", BaseScreen.skin)
-        searchButton.onClick {
-            searchQuery = searchField.text.trim()
-            refresh()
+        if (Gdx.app.type == Application.ApplicationType.Android) {
+            // libGDX TextField doesn't reliably support Korean IME composition on Android.
+            // Native Android EditText composes Hangul before passing back the full string.
+            val nativeSearchButton = TextButton("검색어 입력 (한글 지원)", BaseScreen.skin)
+            nativeSearchButton.onClick {
+                Gdx.input.getTextInput(object : Input.TextInputListener {
+                    override fun input(text: String) {
+                        searchQuery = text.trim()
+                        refresh()
+                    }
+                    override fun canceled() { /* keep the previous query */ }
+                }, "군수 시장 검색", searchQuery, "유닛명 / 국가 / 도시")
+            }
+            searchBar.add(nativeSearchButton).padRight(4f)
+            if (searchQuery.isNotEmpty())
+                searchBar.add("검색: $searchQuery".toLabel(hideIcons = true)).left().padRight(4f)
+        } else {
+            // Desktop keeps ordinary inline typing and Enter-independent search.
+            val searchField = TextField(searchQuery, BaseScreen.skin)
+            searchField.messageText = "유닛명 / 국가 / 도시 검색"
+            searchBar.add(searchField).width(260f).padRight(4f)
+            val searchButton = TextButton("검색", BaseScreen.skin)
+            searchButton.onClick {
+                searchQuery = searchField.text.trim()
+                refresh()
+            }
+            searchBar.add(searchButton)
         }
-        searchBar.add(searchButton)
         val clearButton = TextButton("초기화", BaseScreen.skin)
         clearButton.onClick {
             searchQuery = ""
