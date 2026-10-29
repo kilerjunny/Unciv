@@ -1,0 +1,86 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unciv Grand Strategy — 편제 관리 시제품</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,'Noto Sans KR',sans-serif}*{box-sizing:border-box}body{margin:0;background:#101827;color:#e9effb}main{max-width:850px;margin:auto;padding:16px}h1{font-size:1.4rem;margin:8px 0}h2{font-size:1rem;margin:0}.sub{color:#a4b4cf;font-size:.88rem}.bar,.item,.line{display:flex;align-items:center;justify-content:space-between;gap:9px}.bar{flex-wrap:wrap}.box{background:#1a2638;border:1px solid #34455f;border-radius:13px;padding:15px;margin:13px 0}.item{margin:7px 0;background:#24334b;border-radius:9px;padding:10px}.item .name{flex:1;min-width:0}.name small{display:block;color:#a9b8cc;margin-top:3px}button,input,select{font:inherit;border-radius:8px;padding:8px 10px;border:1px solid #435772}button{background:#324862;color:white;cursor:pointer}button.primary{background:#295fba;border-color:#5186e3}button.danger{color:#ffbdbd;border-color:#9b4e57}button:disabled{opacity:.45}input{background:#0f1a2a;color:white;max-width:100%;min-width:80px}select{background:#101a2a;color:white;max-width:100%}.nav{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}.nav button{font-size:.83rem;padding:6px}.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.muted{color:#a4b4cf;font-size:.84rem}.chip{display:inline-block;border-radius:12px;background:#314461;padding:3px 8px;font-size:.8rem}.unit{color:#d6e3f9}.inside{border-left:3px solid #79a8f5}.sectiontitle{font-size:.88rem;font-weight:700;color:#b9cee9;margin:13px 0 5px}.pathlabel{font-size:.78rem;color:#9fb7d9}.count{font-size:.77rem;color:#a6c0dc}.unit-count{background:#394f6f;border-radius:12px;padding:2px 7px}.empty{padding:10px 0;color:#8fa1bc}.small{font-size:.84rem}.stack{display:flex;flex-direction:column;gap:8px}.wide{flex:1}footer{color:#91a1b9;font-size:.77rem;margin:18px 0}button:focus,input:focus,select:focus{outline:2px solid #92b9ff}#notice{color:#9ce2be;min-height:1.5rem}
+</style></head><body><main>
+<header class="bar"><div><h1>⚓ Unciv: Grand Strategy</h1><div class="sub">계층형 군사 편제 · 독립 실행 시제품 (게임 미연동)</div></div><button id="reset" class="danger">예시 초기화</button></header>
+<div id="notice" aria-live="polite"></div>
+<section class="box"><div class="bar"><h2 id="heading">전체 편제</h2><span id="counts" class="chip"></span></div><nav class="nav" id="breadcrumbs"></nav><div id="folders"></div>
+<div class="controls"><input class="wide" id="newName" placeholder="새 편제 이름" aria-label="새 편제 이름"><button id="create" class="primary">+ 편제 생성</button></div></section>
+<section class="box" id="unitPanel">
+<div class="bar"><h2>📋 현재 편제의 소속 유닛</h2><span class="muted">실제 유닛은 이동하지 않음</span></div>
+<p class="muted" id="unitContext">편제를 선택하면 소속 유닛이 표시돼.</p>
+<div class="sectiontitle">직속 유닛 <span class="count" id="directCount"></span></div><div id="assigned"></div>
+<div class="sectiontitle">하위 편제 소속 유닛 <span class="count" id="indirectCount"></span></div><div id="indirect"></div>
+<div class="sectiontitle">미배속 유닛</div><div id="unassigned"></div>
+</section>
+<section class="box"><h2>데이터 관리</h2><p class="muted">브라우저에서 자동 저장돼. JSON 내보내기·가져오기는 시제품 편제 데이터용이며 Unciv 세이브 파일이 아니야.</p><div class="controls"><button id="export">JSON 내보내기</button><label class="small">JSON 가져오기 <input id="import" type="file" accept=".json,application/json"></label></div></section>
+<footer>시제품 v0.2 — Tech-Stopper-_Renaissance-_의 원본 JSON 규칙은 포함·변경하지 않았어. 실제 게임 탭 및 저장 연동은 Kotlin 엔진 패치 필요.</footer>
+</main><script>
+'use strict';
+const SAMPLE={version:1,formations:[
+{id:'navy',name:'해군성',parentId:null,kind:'navy_hq'},
+{id:'east',name:'동방함대',parentId:'navy',kind:'fleet'},
+{id:'west',name:'서방함대',parentId:'navy',kind:'fleet'},
+{id:'mobile',name:'기동함대',parentId:'navy',kind:'fleet'},
+{id:'van',name:'전위전대',parentId:'east',kind:'squadron'},
+{id:'center',name:'중앙전대',parentId:'east',kind:'squadron'},
+{id:'rear',name:'후위전대',parentId:'east',kind:'squadron'},
+{id:'army',name:'육군 총사령부',parentId:null,kind:'army_hq'},
+{id:'field',name:'제1야전군',parentId:'army',kind:'field_army'},
+{id:'corps',name:'제1군단',parentId:'field',kind:'corps'}],
+units:[{id:'ad1',name:'제독 · HMS Britannia',formationId:'east'},
+{id:'ad2',name:'제독 · HMS Victory',formationId:'west'},
+{id:'ad3',name:'제독 · HMS London',formationId:'mobile'},
+{id:'ship1',name:'전열함 (예시 #1)',formationId:'van'},
+{id:'ship2',name:'프리깃 (예시 #2)',formationId:'center'},
+{id:'ship3',name:'전열함 (예시 #3)',formationId:null},
+{id:'ship4',name:'프리깃 (예시 #4)',formationId:null},
+{id:'soldier1',name:'보병 (예시 #5)',formationId:null}]};
+const KEY='unciv-grand-strategy-formation-v1';
+const clone=x=>JSON.parse(JSON.stringify(x));
+let data;try{data=JSON.parse(localStorage.getItem(KEY))||clone(SAMPLE)}catch{data=clone(SAMPLE)}
+let current=null;
+const el=id=>document.getElementById(id);
+const node=id=>data.formations.find(f=>f.id===id);
+const kids=id=>data.formations.filter(f=>f.parentId===id);
+const units=id=>data.units.filter(u=>u.formationId===id);
+const allUnits=id=>{const group=descendants(id);return data.units.filter(u=>group.has(u.formationId))};
+function locationPath(formationId){const trail=[], seen=new Set();let f=node(formationId);while(f&&!seen.has(f.id)){seen.add(f.id);trail.unshift(f.name);f=node(f.parentId)}return trail.join(' › ')}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch{}};
+const notice=message=>{el('notice').textContent=message};
+function btn(label,fn,css=''){const b=document.createElement('button');b.textContent=label;b.className=css;b.onclick=fn;return b}
+function span(text,css=''){const s=document.createElement('span');s.textContent=text;s.className=css;return s}
+function line(name,detail){const d=document.createElement('div');d.className='name';d.append(span(name));const s=document.createElement('small');s.textContent=detail;d.append(s);return d}
+function navTo(id){current=id;render()}
+function descendants(id){const found=new Set([id]);let changed=true;while(changed){changed=false;for(const f of data.formations)if(found.has(f.parentId)&&!found.has(f.id)){found.add(f.id);changed=true}}return found}
+function doDelete(id){const removed=descendants(id);if(!confirm(`'${node(id).name}' 및 하위 ${removed.size-1}개 편제를 삭제할까? 실제 유닛은 미배속으로 남아.`))return;data.formations=data.formations.filter(f=>!removed.has(f.id));data.units.forEach(u=>{if(removed.has(u.formationId))u.formationId=null});current=null;save();render();notice('편제만 삭제했어. 유닛은 보존됐어.')}
+function rename(id){const name=prompt('새 편제 이름',node(id).name);if(name===null)return;if(!name.trim()){notice('이름을 입력해야 해.');return}node(id).name=name.trim();save();render()}
+function move(id){const banned=descendants(id);const targets=[{id:null,name:'전체 편제 (최상위)'},...data.formations.filter(f=>!banned.has(f.id)).map(f=>({id:f.id,name:f.name}))];const hint=targets.map((t,i)=>`${i}: ${t.name}`).join('\n');const idx=prompt(`이동할 상위 편제의 번호를 입력해.\n${hint}`);if(idx===null)return;const target=targets[Number(idx)];if(!target||String(Number(idx))!==String(idx).trim()){notice('올바른 번호를 입력해.');return}node(id).parentId=target.id;save();render();notice('상위 편제를 변경했어.')}
+function make(){const name=el('newName').value.trim();if(!name){notice('편제 이름을 입력해.');return}const id='f-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);data.formations.push({id,name,parentId:current,kind:'custom'});el('newName').value='';save();render();notice(`'${name}' 편제를 생성했어.`)}
+function moveUnit(unitId,toId){data.units.find(u=>u.id===unitId).formationId=toId;save();render()}
+function render(){
+if(current!==null&&!node(current))current=null;
+el('heading').textContent=current===null?'전체 편제':node(current).name;
+el('counts').textContent=current===null?`최상위 ${kids(null).length}개`:`하위 ${kids(current).length}개 · 직속 ${units(current).length}개 · 전체 ${allUnits(current).length}개`;
+const nav=el('breadcrumbs');nav.replaceChildren(btn('전체',()=>navTo(null)));const chain=[];let ptr=current;const seen=new Set();while(ptr!==null&&node(ptr)&&!seen.has(ptr)){seen.add(ptr);chain.unshift(node(ptr));ptr=node(ptr).parentId}for(const f of chain){nav.append(span('›'));nav.append(btn(f.name,()=>navTo(f.id)))}
+const folders=el('folders');folders.replaceChildren();for(const f of kids(current)){
+const row=document.createElement('div');row.className='item';const num=allUnits(f.id).length;const enter=btn('📁 '+f.name+' · '+num+'유닛',()=>navTo(f.id),'wide');row.append(enter,btn('이름',()=>rename(f.id)),btn('이동',()=>move(f.id)),btn('삭제',()=>doDelete(f.id),'danger'));folders.append(row)
+}if(kids(current).length===0)folders.append(span('하위 편제 없음','muted'));
+el('unitPanel').style.display=current===null?'none':'';
+if(current!==null){el('unitContext').textContent=`${locationPath(current)} 편제에 직접 소속되거나 하위 편제에 속한 유닛을 표시해.`;el('directCount').textContent=`(${units(current).length}개)`;el('indirectCount').textContent=`(${allUnits(current).length-units(current).length}개)`;}
+const assigned=el('assigned');assigned.replaceChildren();for(const u of units(current)){
+const r=document.createElement('div');r.className='item inside';r.append(line('⚓ '+u.name,'이 편제에 직접 소속 · '+u.id),btn('배속 해제',()=>moveUnit(u.id,null)));assigned.append(r)
+}if(!units(current).length)assigned.append(span('직속 유닛 없음','empty'));
+const indirect=el('indirect');indirect.replaceChildren();for(const u of allUnits(current).filter(u=>u.formationId!==current)){const r=document.createElement('div');r.className='item inside';const name=line('⚓ '+u.name,'소속: '+locationPath(u.formationId));r.append(name,btn('소속 편제 열기',()=>navTo(u.formationId)));indirect.append(r)}if(!indirect.children.length)indirect.append(span('하위 편제에 배속된 유닛 없음','empty'));
+const unassigned=el('unassigned');unassigned.replaceChildren();for(const u of units(null)){
+const r=document.createElement('div');r.className='item';r.append(line(u.name,u.id),btn('여기에 배속',()=>moveUnit(u.id,current),'primary'));unassigned.append(r)
+}if(!units(null).length)unassigned.append(span('미배속 유닛 없음','muted'));
+}
+function valid(v){if(!v||v.version!==1||!Array.isArray(v.formations)||!Array.isArray(v.units))return false;const ids=new Set();for(const f of v.formations){if(typeof f.id!=='string'||!f.id||ids.has(f.id)||typeof f.name!=='string'||!f.name.trim())return false;ids.add(f.id)}for(const f of v.formations){let p=f.parentId;const seen=new Set([f.id]);while(p!==null){if(!ids.has(p)||seen.has(p))return false;seen.add(p);p=v.formations.find(x=>x.id===p).parentId}}const us=new Set();for(const u of v.units){if(typeof u.id!=='string'||us.has(u.id)||typeof u.name!=='string'||(u.formationId!==null&&!ids.has(u.formationId)))return false;us.add(u.id)}return true}
+el('create').onclick=make;el('newName').onkeydown=e=>{if(e.key==='Enter')make()};
+el('reset').onclick=()=>{if(confirm('현재 시제품 데이터를 초기화할까?')){data=clone(SAMPLE);current=null;save();render();notice('초기화했어.')}};
+el('export').onclick=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='formations-demo.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+el('import').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{const v=JSON.parse(await file.text());if(!valid(v))throw new Error('형식 또는 편제 관계가 올바르지 않아.');data=v;current=null;save();render();notice('시제품 편제 JSON을 가져왔어.')}catch(err){notice('가져오기 실패: '+err.message)}e.target.value=''};
+if(!valid(data))data=clone(SAMPLE);render();
+</script></body></html>

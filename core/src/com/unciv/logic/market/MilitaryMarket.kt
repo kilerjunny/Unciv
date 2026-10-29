@@ -12,6 +12,8 @@ import yairm210.purity.annotations.Readonly
 
 /** Build-to-order unit trading: seller produces, seller releases, buyer takes the same unit. */
 object MilitaryMarket {
+    /** An AI buyer made an offer to a human seller. No unit is queued yet. */
+    const val PENDING_APPROVAL = "PENDING_APPROVAL"
     const val PRODUCING = "PRODUCING"
     const val AWAITING_DISPATCH = "AWAITING_DISPATCH"
     const val AWAITING_RECEIPT = "AWAITING_RECEIPT"
@@ -141,14 +143,27 @@ object MilitaryMarket {
         val price = listing?.price ?: referencePrice(seller, city, unit)
         if (price <= 0 || buyer.gold < price || game.militaryMarketContracts.size >= 40) return false
 
-        val before = city.cityConstructions.constructionQueue.count { it == unit.name }
-        city.cityConstructions.addToQueue(unit, addToTop = true)
-        if (city.cityConstructions.constructionQueue.count { it == unit.name } != before + 1) return false
+        // Do not spam the same player with an offer they recently declined.
+        if (seller.isHuman() && buyer.isAI() && game.militaryMarketHistory.any {
+                it.sellerCivId == seller.civID && it.buyerCivId == buyer.civID &&
+                    it.unitName == unit.name && it.status == "주문 거절" &&
+                    game.turns >= it.turn && game.turns - it.turn < 12
+            }) return false
+
+        // AI sellers accept immediately. Human sellers must explicitly approve,
+        // otherwise the AI would silently occupy the player's production queue.
+        if (!seller.isHuman()) {
+            val before = city.cityConstructions.constructionQueue.count { it == unit.name }
+            city.cityConstructions.addToQueue(unit, addToTop = true)
+            if (city.cityConstructions.constructionQueue.count { it == unit.name } != before + 1)
+                return false
+        }
 
         buyer.addGold(-price)
         game.militaryMarketContracts.add(MilitaryMarketContract(
             UUID.randomUUID().toString(), seller.civID, city.id,
-            buyer.civID, unit.name, price, game.turns
+            buyer.civID, unit.name, price, game.turns,
+            if (seller.isHuman()) PENDING_APPROVAL else PRODUCING
         ))
         // A city cannot service several simultaneous custom-production orders.
         game.militaryMarketListings.removeAll {
@@ -159,7 +174,7 @@ object MilitaryMarket {
             NotificationCategory.Trade, NotificationIcon.Trade, seller.civName
         )
         if (seller.isHuman()) seller.addNotification(
-            "군수 시장: [${buyer.civName}]의 [${unit.name}] 주문이 접수되었습니다.",
+            "군수 시장: [${buyer.civName}]의 [${unit.name}] 발주 요청. 거래 탭에서 수락 또는 거절하세요.",
             NotificationCategory.Trade, NotificationIcon.Trade, buyer.civName
         )
         return true
@@ -172,10 +187,53 @@ object MilitaryMarket {
         .filter { it.sellerCivId == civ.civID }
 
     fun statusLabel(contract: MilitaryMarketContract): String = when (contract.status) {
+        PENDING_APPROVAL -> "판매국 승인 대기"
         PRODUCING -> "생산 중"
         AWAITING_DISPATCH -> "완공 · 인도하기 대기"
         AWAITING_RECEIPT -> "인도 승인됨 · 인도받기 대기"
         else -> "상태 확인 필요"
+    }
+
+    /** Seller approves a prepaid offer, then and only then starts unit production. */
+    fun approveOrder(seller: Civilization, contractId: String): Boolean {
+        if (!seller.isHuman() || seller.isDefeated()) return false
+        val game = seller.gameInfo
+        val contract = game.militaryMarketContracts.firstOrNull {
+            it.id == contractId && it.sellerCivId == seller.civID &&
+                it.status == PENDING_APPROVAL
+        } ?: return false
+        val buyer = game.getCivilizationOrNull(contract.buyerCivId) ?: return false
+        if (!tradingPartners(buyer, seller)) return false
+        val city = seller.cities.firstOrNull { it.id == contract.sellerCityId } ?: return false
+        if (city.isPuppet || city.isInResistance() || city.isBeingRazed) return false
+        val unit = game.ruleset.units[contract.unitName] ?: return false
+        if (!unit.isMilitary || unit.isGreatPerson ||
+            !city.cityConstructions.canAddToQueue(unit) ||
+            city.cityConstructions.constructionQueue.contains(unit.name) ||
+            city.cityConstructions.getConstructableUnits().none { it.name == unit.name }
+        ) return false
+        val before = city.cityConstructions.constructionQueue.count { it == unit.name }
+        city.cityConstructions.addToQueue(unit, addToTop = true)
+        if (city.cityConstructions.constructionQueue.count { it == unit.name } != before + 1)
+            return false
+        contract.status = PRODUCING
+        if (buyer.isHuman()) buyer.addNotification(
+            "군수 시장: [${seller.civName}]이 [${unit.name}] 발주를 수락했습니다. 생산 시작.",
+            NotificationCategory.Trade, NotificationIcon.Trade, seller.civName
+        )
+        return true
+    }
+
+    /** Seller declines before production, releasing the city and refunding escrow. */
+    fun rejectOrder(seller: Civilization, contractId: String): Boolean {
+        if (!seller.isHuman()) return false
+        val game = seller.gameInfo
+        val contract = game.militaryMarketContracts.firstOrNull {
+            it.id == contractId && it.sellerCivId == seller.civID &&
+                it.status == PENDING_APPROVAL
+        } ?: return false
+        refund(game, contract, "판매국 거절", "주문 거절")
+        return true
     }
 
     private fun producedUnit(game: GameInfo, contract: MilitaryMarketContract): MapUnit? {
@@ -282,6 +340,7 @@ object MilitaryMarket {
             val valid = buyer != null && !buyer.isDefeated() && buyer.cities.isNotEmpty() &&
                 seller != null && !seller.isDefeated() && city != null &&
                 !buyer.isAtWarWith(seller) && when (contract.status) {
+                    PENDING_APPROVAL -> true // No queue entry exists until seller approval.
                     PRODUCING -> contract.unitName in city.cityConstructions.constructionQueue
                     AWAITING_DISPATCH, AWAITING_RECEIPT -> producedUnit(game, contract) != null
                     else -> false
@@ -295,12 +354,14 @@ object MilitaryMarket {
         val game = buyer.gameInfo
         val contract = game.militaryMarketContracts.firstOrNull {
             it.id == contractId && it.buyerCivId == buyer.civID &&
-                it.status == PRODUCING
+                (it.status == PRODUCING || it.status == PENDING_APPROVAL)
         } ?: return false
-        val seller = game.getCivilizationOrNull(contract.sellerCivId)
-        val city = seller?.cities?.firstOrNull { it.id == contract.sellerCityId }
-        val index = city?.cityConstructions?.constructionQueue?.indexOf(contract.unitName) ?: -1
-        if (index >= 0) city!!.cityConstructions.removeFromQueue(index, false)
+        if (contract.status == PRODUCING) {
+            val seller = game.getCivilizationOrNull(contract.sellerCivId)
+            val city = seller?.cities?.firstOrNull { it.id == contract.sellerCityId }
+            val index = city?.cityConstructions?.constructionQueue?.indexOf(contract.unitName) ?: -1
+            if (index >= 0) city!!.cityConstructions.removeFromQueue(index, false)
+        }
         refund(game, contract, "구매자 취소")
         return true
     }
@@ -313,8 +374,27 @@ object MilitaryMarket {
         while (game.militaryMarketHistory.size > 100) game.militaryMarketHistory.removeAt(0)
     }
 
-    private fun refund(game: GameInfo, contract: MilitaryMarketContract, reason: String) {
+    private fun refund(
+        game: GameInfo, contract: MilitaryMarketContract, reason: String,
+        historyStatus: String = "환불"
+    ) {
         if (!game.militaryMarketContracts.remove(contract)) return
+        // Restore a public listing if its pending offer was declined/cancelled.
+        // The city can now receive orders from other buyers without relisting.
+        if (contract.status == PENDING_APPROVAL) {
+            val seller = game.getCivilizationOrNull(contract.sellerCivId)
+            val city = seller?.cities?.firstOrNull { it.id == contract.sellerCityId }
+            val unit = game.ruleset.units[contract.unitName]
+            if (seller?.isHuman() == true && city != null && unit != null &&
+                eligibleCity(city) && city.cityConstructions.canAddToQueue(unit) &&
+                game.militaryMarketListings.none {
+                    it.sellerCivId == contract.sellerCivId && it.sellerCityId == contract.sellerCityId
+                }
+            ) game.militaryMarketListings.add(MilitaryMarketListing(
+                UUID.randomUUID().toString(), contract.sellerCivId, contract.sellerCityId,
+                contract.unitName, contract.price, game.turns
+            ))
+        }
         game.getCivilizationOrNull(contract.buyerCivId)?.let { buyer ->
             buyer.addGold(contract.price)
             if (buyer.isHuman()) buyer.addNotification(
@@ -323,6 +403,6 @@ object MilitaryMarket {
             )
         }
         // A completed unit not received remains the seller's own unit.
-        log(game, contract, "환불")
+        log(game, contract, historyStatus)
     }
 }

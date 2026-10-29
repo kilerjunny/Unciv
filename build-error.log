@@ -1,0 +1,55 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :buildSrc:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :buildSrc:compileKotlin UP-TO-DATE
+> Task :buildSrc:compileJava NO-SOURCE
+> Task :buildSrc:compileGroovy NO-SOURCE
+> Task :buildSrc:pluginDescriptors UP-TO-DATE
+> Task :buildSrc:processResources NO-SOURCE
+> Task :buildSrc:classes UP-TO-DATE
+> Task :buildSrc:jar UP-TO-DATE
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+
+> Task :core:compileKotlin
+e: file:///workspaces/Unciv/core/src/com/unciv/logic/map/mapunit/movement/UnitMovement.kt:162:45 Function "getShortestPath" is marked as Readonly but calls non-Readonly function "com.unciv.logic.automation.civilization.GrandStrategyPerf.startPath".
+ - If this is in your code, add @Readonly annotation to the function.
+ - If this is in external code, you can declare it as Readonly via the PurityConfiguration in gradle - see https://yairm210.github.io/Purity/usage/configuration/#handling-external-classes 
+
+e: file:///workspaces/Unciv/core/src/com/unciv/logic/map/mapunit/movement/UnitMovement.kt:281:31 Function "getShortestPath" is marked as Readonly but calls non-Readonly function "com.unciv.logic.automation.civilization.GrandStrategyPerf.finishPath".
+ - If this is in your code, add @Readonly annotation to the function.
+ - If this is in external code, you can declare it as Readonly via the PurityConfiguration in gradle - see https://yairm210.github.io/Purity/usage/configuration/#handling-external-classes 
+
+e: file:///workspaces/Unciv/core/src/com/unciv/logic/map/mapunit/movement/UnitMovement.kt:890:45 Function "getDistanceToTiles" is marked as Readonly but calls non-Readonly function "com.unciv.logic.automation.civilization.GrandStrategyPerf.startPath".
+ - If this is in your code, add @Readonly annotation to the function.
+ - If this is in external code, you can declare it as Readonly via the PurityConfiguration in gradle - see https://yairm210.github.io/Purity/usage/configuration/#handling-external-classes 
+
+e: file:///workspaces/Unciv/core/src/com/unciv/logic/map/mapunit/movement/UnitMovement.kt:911:31 Function "getDistanceToTiles" is marked as Readonly but calls non-Readonly function "com.unciv.logic.automation.civilization.GrandStrategyPerf.finishPath".
+ - If this is in your code, add @Readonly annotation to the function.
+ - If this is in external code, you can declare it as Readonly via the PurityConfiguration in gradle - see https://yairm210.github.io/Purity/usage/configuration/#handling-external-classes 
+
+
+> Task :core:compileKotlin FAILED
+
+[Incubating] Problems report is available at: file:///workspaces/Unciv/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':core:compileKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 43s
+4 actionable tasks: 1 executed, 3 up-to-date
