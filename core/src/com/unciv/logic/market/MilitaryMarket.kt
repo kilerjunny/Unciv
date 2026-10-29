@@ -29,7 +29,8 @@ object MilitaryMarket {
     private fun tradingPartners(buyer: Civilization, seller: Civilization): Boolean =
         buyer != seller && (buyer.isHuman() || buyer.isAI()) &&
             (seller.isHuman() || seller.isAI()) &&
-            buyer.isMajorCiv() && seller.isMajorCiv() &&
+            (buyer.isMajorCiv() || buyer.isCityState) &&
+            (seller.isMajorCiv() || seller.isCityState) &&
             !buyer.isDefeated() && !seller.isDefeated() &&
             buyer.knows(seller) && seller.knows(buyer) &&
             !buyer.isAtWarWith(seller) &&
@@ -79,7 +80,8 @@ object MilitaryMarket {
 
     /** AI sellers display their buildable units automatically, player sellers only their listings. */
     fun offersFor(buyer: Civilization, limit: Int = 100): List<Offer> {
-        if (buyer.isDefeated() || buyer.cities.isEmpty() || !buyer.isMajorCiv()) return emptyList()
+        if (buyer.isDefeated() || buyer.cities.isEmpty() ||
+            !(buyer.isMajorCiv() || buyer.isCityState)) return emptyList()
         val game = buyer.gameInfo
         val results = ArrayList<Offer>()
 
@@ -96,7 +98,9 @@ object MilitaryMarket {
         }
 
         // AI sellers don't need serialized offer objects, preventing save-file bloat.
-        for (seller in game.civilizations) {
+        // City-states sell their currently constructable units just like AI majors.
+        // Put them early so the 100-offer catalogue limit won't hide them.
+        for (seller in game.civilizations.sortedByDescending { it.isCityState }) {
             if (!seller.isAI() || !tradingPartners(buyer, seller)) continue
             val city = seller.cities.asSequence()
                 .filter { eligibleCity(it) }

@@ -4,14 +4,26 @@ import com.unciv.logic.civilization.Civilization
 
 /** Light AI participation. Called once per AI turn, never per rendered frame. */
 object MilitaryMarketAI {
-    private const val MIN_GOLD_RESERVE = 100
-    private const val COOLDOWN_TURNS = 12
-    private const val MAX_ACTIVE_CONTRACTS = 24
+    // Procurement is throttled by cooldown, one active order per buyer, and a
+    // global cap; reserve cash separately to avoid starving city-state economies.
+    private const val COOLDOWN_TURNS = 6
+    private const val MAX_ACTIVE_CONTRACTS = 32
+
+    private fun reserveFor(civ: Civilization): Int = if (civ.isCityState) 25 else 50
+
+    private fun hasDemand(civ: Civilization): Boolean {
+        if (civ.isAtWar()) return true
+        val soldiers = civ.units.getCivUnits().count { it.isMilitary() }
+        // Relaxed peacetime ceiling; city-states with one city can still import.
+        return soldiers < maxOf(8, civ.cities.size * 8)
+    }
 
     /** AI avoids spending its entire treasury, but can purchase cheaper equipment. */
     private fun purchaseBudget(civ: Civilization, atWar: Boolean): Int {
-        val spare = (civ.gold - MIN_GOLD_RESERVE).coerceAtLeast(0)
-        val fraction = if (atWar) civ.gold * 2 / 3 else civ.gold / 2
+        val spare = (civ.gold - reserveFor(civ)).coerceAtLeast(0)
+        // More willing to import while retaining a minimum liquidity cushion.
+        val fraction = if (atWar) (civ.gold.toLong() * 9 / 10).toInt()
+            else (civ.gold.toLong() * 4 / 5).toInt()
         return minOf(spare, fraction)
     }
 
@@ -23,7 +35,7 @@ object MilitaryMarketAI {
      * Recomputed on the AI's turn; no cache or save-file schema change.
      */
     fun protectedGold(civ: Civilization): Int {
-        if (!civ.isAI() || !civ.isMajorCiv() || civ.isDefeated() ||
+        if (!civ.isAI() || !(civ.isMajorCiv() || civ.isCityState) || civ.isDefeated() ||
             civ.cities.isEmpty() || civ.gold <= 0) return 0
         val game = civ.gameInfo
         if (game.militaryMarketContracts.size >= MAX_ACTIVE_CONTRACTS ||
@@ -31,8 +43,7 @@ object MilitaryMarketAI {
         val last = game.militaryMarketAILastOrderTurn[civ.civID] ?: -1000
         if (game.turns - last < COOLDOWN_TURNS) return 0
         val atWar = civ.isAtWar()
-        if (!atWar && civ.units.getCivUnits().count { it.isMilitary() } >= civ.cities.size * 5)
-            return 0
+        if (!hasDemand(civ)) return 0
         val hasNavalBase = civ.cities.any { it.isNaval() }
         val ceiling = if (atWar) 550 else 350
         val cheapestPrice = MilitaryMarket.offersFor(civ, limit = 100)
@@ -48,17 +59,17 @@ object MilitaryMarketAI {
                     (!unit.isWaterUnit || hasNavalBase)
             }
             .minOfOrNull { it.price } ?: return 0
-        // These targets satisfy BOTH the 100G liquidity floor and the AI's
-        // 50% peaceful / 2/3 wartime purchase-budget limit.
+        // Target is the minimum treasury that satisfies both the cash reserve
+        // and the 80% peaceful / 90% wartime purchase-budget rule.
         val target = if (atWar)
-            maxOf(cheapestPrice + MIN_GOLD_RESERVE, (cheapestPrice * 3 + 1) / 2)
+            maxOf(cheapestPrice + reserveFor(civ), (cheapestPrice * 10 + 8) / 9)
         else
-            maxOf(cheapestPrice + MIN_GOLD_RESERVE, cheapestPrice * 2)
+            maxOf(cheapestPrice + reserveFor(civ), (cheapestPrice * 5 + 3) / 4)
         return minOf(civ.gold, target)
     }
 
     fun processTurn(civ: Civilization) {
-        if (!civ.isAI() || !civ.isMajorCiv() || civ.isDefeated()) return
+        if (!civ.isAI() || !(civ.isMajorCiv() || civ.isCityState) || civ.isDefeated()) return
         val game = civ.gameInfo
 
         // AI buyers accept delivered units automatically. Human buyers decide manually.
@@ -79,11 +90,10 @@ object MilitaryMarketAI {
         if (game.militaryMarketContracts.size >= MAX_ACTIVE_CONTRACTS || civ.cities.isEmpty()) return
         if (MilitaryMarket.myContracts(civ).isNotEmpty()) return
         val last = game.militaryMarketAILastOrderTurn[civ.civID] ?: -1000
-        if (game.turns - last < COOLDOWN_TURNS || civ.gold < MIN_GOLD_RESERVE) return
+        if (game.turns - last < COOLDOWN_TURNS || civ.gold <= reserveFor(civ)) return
 
         val atWar = civ.isAtWar()
-        val militaryCount = civ.units.getCivUnits().count { it.isMilitary() }
-        if (!atWar && militaryCount >= civ.cities.size * 5) return
+        if (!hasDemand(civ)) return
         val budget = purchaseBudget(civ, atWar)
         if (budget <= 0) return
         val hasNavalBase = civ.cities.any { it.isNaval() }
@@ -103,7 +113,9 @@ object MilitaryMarketAI {
                 val buyerPreference = if (seller.isHuman()) 150 else 0
                 // Civilisation-unique units are tradable, even if the buyer cannot train them.
                 val uniqueBonus = if (unit.uniqueTo != null || unit.replaces != null) 30 else 0
-                val score = unit.getForceEvaluation().toDouble() / offer.price * 100 + buyerPreference + uniqueBonus
+                val cityStateBonus = if (seller.isCityState) 12 else 0
+                val score = unit.getForceEvaluation().toDouble() / offer.price * 100 +
+                    buyerPreference + uniqueBonus + cityStateBonus
                 score to offer
             }
             .sortedByDescending { it.first }
@@ -126,15 +138,16 @@ object MilitaryMarketAI {
         var passage = 0
         var affordable = 0
         var candidates = 0
+        var cityStateCandidates = 0
         for (buyer in game.civilizations) {
-            if (!buyer.isAI() || !buyer.isMajorCiv() || buyer.isDefeated() ||
+            if (!buyer.isAI() || !(buyer.isMajorCiv() || buyer.isCityState) || buyer.isDefeated() ||
                 buyer.cities.isEmpty() || !buyer.knows(seller) || !seller.knows(buyer) ||
                 buyer.isAtWarWith(seller)) continue
             known++
             // This is necessary for ownership transfer at the seller's actual production base.
             if (!buyer.diplomacyFunctions.canPassThroughTiles(seller)) continue
             passage++
-            if (buyer.gold <= MIN_GOLD_RESERVE) continue
+            if (buyer.gold <= reserveFor(buyer)) continue
             val atWar = buyer.isAtWar()
             val budget = purchaseBudget(buyer, atWar)
             if (listings.none { it.price in 1..budget }) continue
@@ -143,8 +156,7 @@ object MilitaryMarketAI {
                 MilitaryMarket.myContracts(buyer).isNotEmpty()) continue
             val last = game.militaryMarketAILastOrderTurn[buyer.civID] ?: -1000
             if (game.turns - last < COOLDOWN_TURNS) continue
-            val militaryCount = buyer.units.getCivUnits().count { it.isMilitary() }
-            if (!atWar && militaryCount >= buyer.cities.size * 5) continue
+            if (!hasDemand(buyer)) continue
             val feasible = listings.any { listing ->
                 val city = seller.cities.firstOrNull { it.id == listing.sellerCityId }
                 val unit = game.ruleset.units[listing.unitName]
@@ -152,9 +164,13 @@ object MilitaryMarketAI {
                     city.cityConstructions.canAddToQueue(unit) &&
                     listing.unitName !in city.cityConstructions.constructionQueue
             }
-            if (feasible) candidates++
+            if (feasible) {
+                candidates++
+                if (buyer.isCityState) cityStateCandidates++
+            }
         }
         return "AI 구매 진단: 외교 가능 ${known}국 · 통행 가능 ${passage}국 · " +
-            "예산 충족 ${affordable}국 · 현재 발주 후보 ${candidates}국"
+            "예산 충족 ${affordable}국 · 현재 발주 후보 ${candidates}국 " +
+            "(도시국가 ${cityStateCandidates}국 포함)"
     }
 }
