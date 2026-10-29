@@ -82,14 +82,16 @@ object NextTurnAutomation {
         }
 
         if (tradeAndChangeState && civInfo.isAI()) {
+            // Military procurement gets first access to treasury; other purchases
+            // must respect its savings target for a deliverable unit.
+            GrandStrategyPerf.measure("military_market") {
+                MilitaryMarketAI.processTurn(civInfo)
+            }
             GrandStrategyPerf.measure("market_supply") {
                 WorldMarketAutoSupply.update(civInfo)
             }
             GrandStrategyPerf.measure("market_purchase") {
                 WorldMarketAI.buyFromMarketOrders(civInfo)
-            }
-            GrandStrategyPerf.measure("military_market") {
-                MilitaryMarketAI.processTurn(civInfo)
             }
         }
 

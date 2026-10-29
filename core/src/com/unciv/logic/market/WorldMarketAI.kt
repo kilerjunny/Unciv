@@ -28,6 +28,9 @@ object WorldMarketAI {
                     .thenBy { it.id }
             )
 
+        // Preserve funds for a feasible military contract before buying resources.
+        val protectedMilitaryGold = if (orders.isEmpty()) 0 else MilitaryMarketAI.protectedGold(buyer)
+
         for (order in orders) {
             val seller = game.civilizations.firstOrNull {
                 it.civID == order.sellerCivId
@@ -56,7 +59,8 @@ object WorldMarketAI {
             }
 
             // Keep at least half the treasury for other AI expenses.
-            if (buyer.gold.toLong() < order.unitPrice.toLong() * 2L)
+            if (buyer.gold.toLong() < order.unitPrice.toLong() * 2L ||
+                buyer.gold.toLong() - protectedMilitaryGold < order.unitPrice.toLong())
                 continue
 
             // Don't buy luxuries already owned or excess strategic resources.

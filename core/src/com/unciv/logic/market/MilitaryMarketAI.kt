@@ -15,6 +15,48 @@ object MilitaryMarketAI {
         return minOf(spare, fraction)
     }
 
+    /**
+     * Protected treasury for a REAL procurement opportunity, not an unconditional tax.
+     * The target is the amount at which purchaseBudget() will allow the cheapest
+     * deliverable unit. While saving, ordinary spending cannot consume this gold.
+     * No viable offer, no transit rights, no demand or a cooldown => no reservation.
+     * Recomputed on the AI's turn; no cache or save-file schema change.
+     */
+    fun protectedGold(civ: Civilization): Int {
+        if (!civ.isAI() || !civ.isMajorCiv() || civ.isDefeated() ||
+            civ.cities.isEmpty() || civ.gold <= 0) return 0
+        val game = civ.gameInfo
+        if (game.militaryMarketContracts.size >= MAX_ACTIVE_CONTRACTS ||
+            MilitaryMarket.myContracts(civ).isNotEmpty()) return 0
+        val last = game.militaryMarketAILastOrderTurn[civ.civID] ?: -1000
+        if (game.turns - last < COOLDOWN_TURNS) return 0
+        val atWar = civ.isAtWar()
+        if (!atWar && civ.units.getCivUnits().count { it.isMilitary() } >= civ.cities.size * 5)
+            return 0
+        val hasNavalBase = civ.cities.any { it.isNaval() }
+        val ceiling = if (atWar) 550 else 350
+        val cheapestPrice = MilitaryMarket.offersFor(civ, limit = 100)
+            .asSequence()
+            .filter { it.price in 1..ceiling }
+            .filter { offer ->
+                val seller = game.getCivilizationOrNull(offer.sellerId) ?: return@filter false
+                val city = seller.cities.firstOrNull { it.id == offer.cityId } ?: return@filter false
+                val unit = game.ruleset.units[offer.unitName] ?: return@filter false
+                civ.diplomacyFunctions.canPassThroughTiles(seller) &&
+                    offer.unitName !in city.cityConstructions.constructionQueue &&
+                    unit.isMilitary && unit.getForceEvaluation() > 0 &&
+                    (!unit.isWaterUnit || hasNavalBase)
+            }
+            .minOfOrNull { it.price } ?: return 0
+        // These targets satisfy BOTH the 100G liquidity floor and the AI's
+        // 50% peaceful / 2/3 wartime purchase-budget limit.
+        val target = if (atWar)
+            maxOf(cheapestPrice + MIN_GOLD_RESERVE, (cheapestPrice * 3 + 1) / 2)
+        else
+            maxOf(cheapestPrice + MIN_GOLD_RESERVE, cheapestPrice * 2)
+        return minOf(civ.gold, target)
+    }
+
     fun processTurn(civ: Civilization) {
         if (!civ.isAI() || !civ.isMajorCiv() || civ.isDefeated()) return
         val game = civ.gameInfo

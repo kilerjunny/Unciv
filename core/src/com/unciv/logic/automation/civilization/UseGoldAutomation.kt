@@ -3,6 +3,7 @@ package com.unciv.logic.automation.civilization
 import com.unciv.logic.automation.unit.UnitAutomation
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.market.MilitaryMarketAI
 import com.unciv.logic.map.BFS
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.INonPerpetualConstruction
@@ -18,10 +19,14 @@ object UseGoldAutomation {
 
     /** allow AI to spend money to purchase city-state friendship, buildings & unit */
     fun useGold(civ: Civilization) {
+        // Save for attainable build-to-order military units. Upgrades remain military
+        // spending; civilian expenditures must stay above the protected treasury.
+        val protectedMilitaryGold = MilitaryMarketAI.protectedGold(civ)
         for (unit in civ.units.getCivUnits())
             UnitAutomation.tryUpgradeUnit(unit)
 
-        if (civ.isMajorCiv())
+        // City-state investment is discretionary: hold it during procurement saving.
+        if (civ.isMajorCiv() && protectedMilitaryGold == 0)
             useGoldForCityStates(civ)
 
         val acceptableHurryCostModifier = civ.gold.coerceAtLeast(0)/100
@@ -34,12 +39,13 @@ object UseGoldAutomation {
             if (construction !is INonPerpetualConstruction) continue
             val statBuyCost = construction.getStatBuyCost(city, Stat.Gold) ?: continue
             if (!city.cityConstructions.isConstructionPurchaseAllowed(construction, Stat.Gold, statBuyCost)) continue
-            if (civ.gold < statBuyCost || construction.hurryCostModifier > acceptableHurryCostModifier) continue
+            if (civ.gold - protectedMilitaryGold < statBuyCost ||
+                construction.hurryCostModifier > acceptableHurryCostModifier) continue
             if (city.cityConstructions.getWorkDone(construction.name) > 0) continue // Don't buy things we already invested production into (may waste the invested production)
             city.cityConstructions.purchaseConstruction(construction, 0, true)
         }
 
-        maybeBuyCityTiles(civ)
+        maybeBuyCityTiles(civ, protectedMilitaryGold)
     }
 
     private fun useGoldForCityStates(civ: Civilization) {
@@ -66,7 +72,7 @@ object UseGoldAutomation {
         }
     }
 
-    private fun maybeBuyCityTiles(civInfo: Civilization) {
+    private fun maybeBuyCityTiles(civInfo: Civilization, protectedMilitaryGold: Int) {
         if (civInfo.gold <= 0)
             return
         // Don't buy tiles in the very early game. It is unlikely that we already have the required
@@ -102,7 +108,7 @@ object UseGoldAutomation {
             for (tileThatNeedsBuying in tilesThatNeedBuying) {
                 val goldCostOfTile =
                     cityWithLeastCostToBuy.expansion.getGoldCostOfTile(tileThatNeedsBuying)
-                if (civInfo.gold >= goldCostOfTile) {
+                if (civInfo.gold - protectedMilitaryGold >= goldCostOfTile) {
                     cityWithLeastCostToBuy.expansion.buyTile(tileThatNeedsBuying)
                     goldSpent += goldCostOfTile
                 } else {
