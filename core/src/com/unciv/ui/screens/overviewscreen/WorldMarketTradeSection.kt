@@ -268,9 +268,26 @@ class WorldMarketTradeSection(
         // Seller groups are closed by default; expand one to see its purchasable resources.
         val visibleOrders = orders.take(500)
         val bySeller = visibleOrders.groupBy { it.sellerCivId }
-        for ((sellerId, sellerOrders) in bySeller.toList().sortedBy { (id, _) ->
-            gameInfo.civilizations.firstOrNull { it.civID == id }?.civName?.tr() ?: id
-        }) {
+        // Display discovered city-states even with no sell order. This makes it
+        // clear that no sellable surplus exists, rather than hiding the nation.
+        // Keep the regular search/affordability/strategic filters unchanged.
+        val emptyCityStateIds: List<String> = if (
+            query.isEmpty() && !affordableOnly && !strategicOnly
+        ) gameInfo.civilizations.asSequence()
+            .filter { it.isCityState && it.isAI() && !it.isDefeated() }
+            .filter { spectator || it.civName in known }
+            .map { it.civID }
+            .filter { !bySeller.containsKey(it) }
+            .toList()
+        else emptyList()
+
+        val visibleSellerIds = (bySeller.keys + emptyCityStateIds)
+            .distinct()
+            .sortedBy { id ->
+                gameInfo.civilizations.firstOrNull { it.civID == id }?.civName?.tr() ?: id
+            }
+        for (sellerId in visibleSellerIds) {
+            val sellerOrders = bySeller[sellerId].orEmpty()
             val seller = gameInfo.civilizations.firstOrNull { it.civID == sellerId } ?: continue
             val expanded = sellerId in expandedSellerIds
             val sellerButton = TextButton(
@@ -283,6 +300,11 @@ class WorldMarketTradeSection(
             }
             add(sellerButton).left().growX().padTop(6f).row()
             if (!expanded) continue
+            if (sellerOrders.isEmpty()) {
+                add("현재 등록된 판매 자원이 없습니다 (자원 미확보·비축·거래 제한 가능).".toLabel())
+                    .left().growX().row()
+                continue
+            }
             for (order in sellerOrders) {
                 val line = Table(BaseScreen.skin)
 

@@ -41,6 +41,9 @@ object WorldMarketAutoSupply {
                 resource == null -> Int.MAX_VALUE
                 resource.resourceType == ResourceType.Bonus -> Int.MAX_VALUE
                 resource.isStockpiled -> 10
+                // City-states may offer their one locally produced luxury.
+                // Other nations still keep one luxury in reserve.
+                seller.isCityState && resource.resourceType == ResourceType.Luxury -> 0
                 resource.resourceType == ResourceType.Luxury -> 1
                 else -> 2
             }
