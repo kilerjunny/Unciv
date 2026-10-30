@@ -137,6 +137,18 @@ class WorldMarketTradeSection(
                 val buyer = game.getCivilizationOrNull(it.buyerCivId)?.civName?.tr() ?: "알 수 없음"
                 add("턴 ${it.turn}: ${seller} → ${buyer}".toLabel(hideIcons = true)).left().row()
                 add("${it.resourceName.tr()} ${it.quantity}개 · ${it.totalGold}G".toLabel(hideIcons = true)).left().row()
+                // Phase-1 debug view, before the dedicated route-map tab is introduced.
+                if (it.routeMode != "UNKNOWN") {
+                    val routeLabel = when (it.routeMode) {
+                        "LAND" -> "육로"
+                        "SEA" -> "항로"
+                        else -> "경로 미확인"
+                    }
+                    val endpoints = if (it.originCityName.isNotBlank() && it.destinationCityName.isNotBlank())
+                        "${it.originCityName.tr()} → ${it.destinationCityName.tr()} · " else ""
+                    val steps = if (it.routeTiles.size >= 2) " · ${it.routeTiles.size - 1}칸" else ""
+                    add("무역로: $endpoints$routeLabel$steps".toLabel(hideIcons = true)).left().row()
+                }
             }
             return
         }
