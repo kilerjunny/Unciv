@@ -27,6 +27,8 @@ class MilitaryMarketSection(
     private var showHistory = false
     private var showSellRegistration = false
     private var searchQuery = ""
+    // GS_MARKET_COUNTRY_GROUPS_V15_MILITARY
+    private val expandedSellerIds = mutableSetOf<String>()
 
     init { top().left(); render() }
     private fun refresh() { render(); refreshParent() }
@@ -283,7 +285,7 @@ class MilitaryMarketSection(
         }
         // Expand candidates only for an explicit search; normal browsing stays capped.
         val query = searchQuery.trim()
-        val offers = MilitaryMarket.offersFor(civ, limit = if (query.isEmpty()) 100 else 500)
+        val offers = MilitaryMarket.offersFor(civ, limit = 500)
             .asSequence().filter { offer ->
                 if (query.isEmpty()) return@filter true
                 val seller = game.getCivilizationOrNull(offer.sellerId) ?: return@filter false
@@ -291,29 +293,57 @@ class MilitaryMarketSection(
                 listOf(offer.unitName, offer.unitName.tr(), seller.civName,
                     seller.civName.tr(), city?.name.orEmpty(), city?.name?.tr().orEmpty())
                     .any { it.contains(query, ignoreCase = true) }
-            }.take(100).toList()
+            }.toList()
         if (offers.isEmpty()) add((if (query.isEmpty())
             "현재 발주 가능한 판매 상품이 없습니다." else "검색 결과가 없습니다.").toLabel()).left().row()
-        for (offer in offers) {
-            val seller = game.getCivilizationOrNull(offer.sellerId) ?: continue
-            val city = seller.cities.firstOrNull { it.id == offer.cityId } ?: continue
-            val line = Table(BaseScreen.skin)
-            val offeredUnit = game.ruleset.units[offer.unitName]
-            val label = if (offeredUnit?.uniqueTo != null || offeredUnit?.replaces != null) "★ 고유 병종 · " else ""
-            line.add("$label${offer.unitName.tr()} · ${seller.civName.tr()} (${city.name.tr()}) · ${productionEta(city, offer.unitName, false)}"
-                .toLabel(hideIcons = true)).growX().left()
-            line.add("${offer.price}G".toLabel()).padRight(6f)
-            val button = TextButton("발주", BaseScreen.skin)
-            button.isDisabled = !editable || civ.gold < offer.price
-            button.onClick {
-                message = if (editable && MilitaryMarket.order(civ, offer))
-                    "${offer.unitName.tr()} 발주 완료 · 판매국 처리 대기 또는 생산 시작"
-                else "발주 실패 · 금액·생산 조건·외교 관계를 확인하세요."
+        // Unique units are displayed first within each seller, independent of price.
+        val specialUnit: (MilitaryMarket.Offer) -> Boolean = { offer ->
+            val unit = game.ruleset.units[offer.unitName]
+            unit?.uniqueTo != null || unit?.replaces != null
+        }
+        val bySeller = offers.groupBy { it.sellerId }
+            .toList()
+            .sortedWith(compareByDescending<Pair<String, List<MilitaryMarket.Offer>>> { (_, list) ->
+                list.count { specialUnit(it) }
+            }.thenBy { (id, _) -> game.getCivilizationOrNull(id)?.civName?.tr() ?: id })
+        add("판매국을 선택하세요 · 고유 병종 보유 국가 우선".toLabel()).left().row()
+        for ((sellerId, sellerOffers) in bySeller) {
+            val seller = game.getCivilizationOrNull(sellerId) ?: continue
+            val specialCount = sellerOffers.count { specialUnit(it) }
+            val expanded = sellerId in expandedSellerIds
+            val sellerButton = TextButton(
+                "${if (expanded) "접기" else "펼치기"} · ${seller.civName.tr()} · ${sellerOffers.size}종 · 고유 병종 ${specialCount}종",
+                BaseScreen.skin)
+            sellerButton.onClick {
+                if (!expandedSellerIds.add(sellerId)) expandedSellerIds.remove(sellerId)
                 refresh()
             }
-            line.add(button).width(80f)
-            add(line).growX().row()
+            add(sellerButton).left().growX().padTop(6f).row()
+            if (!expanded) continue
+            val prioritized = sellerOffers.sortedWith(
+                compareByDescending<MilitaryMarket.Offer> { specialUnit(it) }
+                    .thenBy { it.unitName.tr() }
+                    .thenBy { it.price })
+            for (offer in prioritized) {
+                val city = seller.cities.firstOrNull { it.id == offer.cityId } ?: continue
+                val line = Table(BaseScreen.skin)
+                val offeredUnit = game.ruleset.units[offer.unitName]
+                val label = if (offeredUnit?.uniqueTo != null || offeredUnit?.replaces != null) "★ 고유 병종 · " else ""
+                line.add("$label${offer.unitName.tr()} · ${seller.civName.tr()} (${city.name.tr()}) · ${productionEta(city, offer.unitName, false)}"
+                    .toLabel(hideIcons = true)).growX().left()
+                line.add("${offer.price}G".toLabel()).padRight(6f)
+                val button = TextButton("발주", BaseScreen.skin)
+                button.isDisabled = !editable || civ.gold < offer.price
+                button.onClick {
+                    message = if (editable && MilitaryMarket.order(civ, offer))
+                        "${offer.unitName.tr()} 발주 완료 · 판매국 처리 대기 또는 생산 시작"
+                    else "발주 실패 · 금액·생산 조건·외교 관계를 확인하세요."
+                    refresh()
+                }
+                line.add(button).width(80f)
+                add(line).growX().row()
+            }
         }
-        if (offers.size >= 100) add("화면 성능을 위해 최대 100개 상품을 표시합니다.".toLabel()).left().row()
+        if (offers.size >= 500) add("최대 500개 상품까지 조회합니다. 검색으로 범위를 좁혀주세요.".toLabel()).left().row()
     }
 }

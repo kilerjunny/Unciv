@@ -33,7 +33,8 @@ class WorldMarketTradeSection(
     private var message = ""
     // GS_WORLD_MARKET_V14_SEARCH
     private var resourceSearch = ""
-    private var priceSort = false
+    // GS_MARKET_COUNTRY_GROUPS_V15_WORLD
+    private val expandedSellerIds = mutableSetOf<String>()
     private var affordableOnly = false
     private var strategicOnly = false
 
@@ -200,13 +201,6 @@ class WorldMarketTradeSection(
         add(searchBar).left().row()
 
         val filters = Table(BaseScreen.skin)
-        val sortButton = TextButton(if (priceSort) "가격순: 낮은 가격" else "정렬: 자원명", BaseScreen.skin)
-        sortButton.onClick {
-            priceSort = !priceSort
-            render()
-            parentTab.overviewScreen.resizePage(parentTab)
-        }
-        filters.add(sortButton)
         val affordable = TextButton(if (affordableOnly) "구매 가능 금액 ✓" else "구매 가능 금액만", BaseScreen.skin)
         affordable.onClick {
             affordableOnly = !affordableOnly
@@ -245,81 +239,92 @@ class WorldMarketTradeSection(
                     (!affordableOnly || order.unitPrice <= buyer.gold) &&
                     (!strategicOnly || resource?.resourceType == ResourceType.Strategic)
             }
-            .sortedWith(
-                if (priceSort) compareBy<com.unciv.logic.market.MarketSellOrder>(
-                    { it.unitPrice }, { it.resourceName }, { it.id })
-                else compareBy<com.unciv.logic.market.MarketSellOrder>(
-                    { it.resourceName }, { it.unitPrice }, { it.sellerCivId }, { it.id })
-            )
+            .sortedWith(compareBy<com.unciv.logic.market.MarketSellOrder>(
+                { it.sellerCivId }, { it.resourceName }, { it.unitPrice }, { it.id }))
 
         add("시장 등록 상품".toLabel(
             fontSize = Constants.headingFontSize
         )).left().growX().row()
 
-        add("검색 결과 ${orders.size}건 · 자원 유형 및 가격 필터 적용".toLabel()).left().row()
+        add("검색 결과 ${orders.size}건 · 판매국을 눌러 상품 보기".toLabel()).left().row()
         if (orders.isEmpty()) {
             add((if (query.isEmpty() && !affordableOnly && !strategicOnly)
                 "현재 등록된 판매 상품이 없습니다." else "조건에 맞는 상품이 없습니다.").toLabel())
                 .left().growX().row()
         }
 
-        for (order in orders.take(100)) {
-            val seller = gameInfo.civilizations.firstOrNull {
-                it.civID == order.sellerCivId
-            } ?: continue
+        // Seller groups are closed by default; expand one to see its purchasable resources.
+        val visibleOrders = orders.take(500)
+        val bySeller = visibleOrders.groupBy { it.sellerCivId }
+        for ((sellerId, sellerOrders) in bySeller.toList().sortedBy { (id, _) ->
+            gameInfo.civilizations.firstOrNull { it.civID == id }?.civName?.tr() ?: id
+        }) {
+            val seller = gameInfo.civilizations.firstOrNull { it.civID == sellerId } ?: continue
+            val expanded = sellerId in expandedSellerIds
+            val sellerButton = TextButton(
+                "${if (expanded) "접기" else "펼치기"} · ${seller.civName.tr()} · ${sellerOrders.size}종",
+                BaseScreen.skin)
+            sellerButton.onClick {
+                if (!expandedSellerIds.add(sellerId)) expandedSellerIds.remove(sellerId)
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            add(sellerButton).left().growX().padTop(6f).row()
+            if (!expanded) continue
+            for (order in sellerOrders) {
+                val line = Table(BaseScreen.skin)
 
-            val line = Table(BaseScreen.skin)
+                line.add(
+                    ImageGetter.getResourcePortrait(
+                        order.resourceName, 32f
+                    )
+                ).size(32f).padRight(5f)
 
-            line.add(
-                ImageGetter.getResourcePortrait(
-                    order.resourceName, 32f
-                )
-            ).size(32f).padRight(5f)
+                val owned = buyer.getResourceAmount(order.resourceName)
+                val info = Table(BaseScreen.skin)
 
-            val owned = buyer.getResourceAmount(order.resourceName)
-            val info = Table(BaseScreen.skin)
+                info.add(
+                    "${order.resourceName.tr()} · ${seller.civName.tr()}"
+                        .toLabel(hideIcons = true)
+                ).left().row()
 
-            info.add(
-                "${order.resourceName.tr()} · ${seller.civName.tr()}"
-                    .toLabel(hideIcons = true)
-            ).left().row()
+                info.add(
+                    "판매 ${order.quantity}개 · 내 가용 ${owned}개 · ${if (order.stockpiled) "비축" else "턴 공급"}"
+                        .toLabel()
+                ).left().row()
 
-            info.add(
-                "판매 ${order.quantity}개 · 내 가용 ${owned}개 · ${if (order.stockpiled) "비축" else "턴 공급"}"
-                    .toLabel()
-            ).left().row()
+                line.add(info).growX().left()
 
-            line.add(info).growX().left()
+                line.add("${order.unitPrice}G".toLabel())
+                    .padRight(6f)
 
-            line.add("${order.unitPrice}G".toLabel())
-                .padRight(6f)
+                if (!spectator) {
+                    val button = TextButton("구매", BaseScreen.skin)
+                    button.isDisabled =
+                        !GUI.isAllowedChangeState() ||
+                        !WorldMarketOrderPurchase.canBuy(buyer, order.id)
 
-            if (!spectator) {
-                val button = TextButton("구매", BaseScreen.skin)
-                button.isDisabled =
-                    !GUI.isAllowedChangeState() ||
-                    !WorldMarketOrderPurchase.canBuy(buyer, order.id)
+                    button.onClick {
+                        message = if (
+                            GUI.isAllowedChangeState() &&
+                            WorldMarketOrderPurchase.buy(buyer, order.id)
+                        ) {
+                            "${order.resourceName.tr()} 1개 구매 완료"
+                        } else {
+                            "구매 불가: 금액·재고·외교 관계 확인"
+                        }
 
-                button.onClick {
-                    message = if (
-                        GUI.isAllowedChangeState() &&
-                        WorldMarketOrderPurchase.buy(buyer, order.id)
-                    ) {
-                        "${order.resourceName.tr()} 1개 구매 완료"
-                    } else {
-                        "구매 불가: 금액·재고·외교 관계 확인"
+                        render()
+                        parentTab.overviewScreen.resizePage(parentTab)
                     }
 
-                    render()
-                    parentTab.overviewScreen.resizePage(parentTab)
+                    line.add(button).width(80f)
                 }
 
-                line.add(button).width(80f)
+                add(line).growX().row()
             }
-
-            add(line).growX().row()
         }
-        if (orders.size > 100)
-            add("화면 성능을 위해 상품 100건만 표시합니다. 검색으로 범위를 좁혀주세요.".toLabel()).left().row()
+        if (orders.size > 500)
+            add("화면 성능을 위해 상품 500건만 표시합니다. 검색으로 범위를 좁혀주세요.".toLabel()).left().row()
     }
 }
