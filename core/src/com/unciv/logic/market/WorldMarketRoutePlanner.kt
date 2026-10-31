@@ -7,12 +7,17 @@ import com.unciv.logic.map.tile.Tile
 import java.util.ArrayDeque
 
 /**
- * Phase 1: physical, observational routes only. Does not move resources, charge gold,
- * generate units or alter existing world-market trade acceptance.
+ * GS_TRADE_ROUTE_MULTIMODAL_V2
  *
- * LAND: traversable land tiles. SEA: continuous water between coastal cities.
- * Diplomatic access, coastal canals, piracy, trade costs and multimodal transfer
- * are intentionally deferred to later phases.
+ * OBSERVATION ONLY: Finds a connected route for already-completed market trades.
+ * No units, inventory changes, gold transfers, turn delays, or AI purchases.
+ *
+ * - A route can cross land and water (LAND, SEA, MIXED).
+ * - Land/water transitions are allowed only through coastal CITY CENTER tiles.
+ * - All cities of both civilizations are considered in ONE multi-source BFS, so the
+ *   nearest cities by straight-line distance need not be selected.
+ * - Physical passability only; foreign borders, canals, blockades, and tariffs
+ *   are explicitly NOT modeled at this stage.
  */
 object WorldMarketRoutePlanner {
     data class Route(
@@ -22,127 +27,96 @@ object WorldMarketRoutePlanner {
         val tiles: List<HexCoord>
     )
 
-    // Bounded LRU: geographic path is stable until the map or endpoints change.
-    // Empty lists cache searches with no route, avoiding repeated map-wide scans.
-    private val cache = LinkedHashMap<String, List<HexCoord>>()
+    // A trade route is recalculated on a different turn. This avoids indefinitely
+    // stale routes when terrain, ports, or the availability of cities changes.
+    // The cache is bounded, and identical seller/buyer trades reuse work this turn.
+    private val cache = LinkedHashMap<String, Route>()
     private const val MaxCacheSize = 128
-    private const val MaxVisitedTiles = 6000
+    private const val MaxVisitedTiles = 10000
 
     fun plan(seller: Civilization, buyer: Civilization): Route {
-        val landPair = closestPair(seller, buyer, coastalOnly = false)
-        val seaPair = closestPair(seller, buyer, coastalOnly = true)
-
-        val land = landPair?.let { pair ->
-            cached(seller, pair.first, pair.second, "LAND") {
-                val from = pair.first.getCenterTile()
-                val to = pair.second.getCenterTile()
-                search(listOf(from), setOf(to)) { it.isLand && !it.isImpassible() }
-            }
-        }.orEmpty()
-
-        val sea = seaPair?.let { pair ->
-            cached(seller, pair.first, pair.second, "SEA") {
-                val from = pair.first.getCenterTile()
-                val to = pair.second.getCenterTile()
-                val starts = from.neighbors.filter { it.isWater && !it.isImpassible() }.toList()
-                val ends = to.neighbors.filter { it.isWater && !it.isImpassible() }.toSet()
-                if (starts.isEmpty() || ends.isEmpty()) emptyList()
-                else {
-                    val seaTiles = search(starts, ends) { it.isWater && !it.isImpassible() }
-                    if (seaTiles.isEmpty()) emptyList()
-                    else listOf(from.position) + seaTiles + listOf(to.position)
-                }
-            }
-        }.orEmpty()
-
-        return when {
-            land.isNotEmpty() && (sea.isEmpty() || land.size <= sea.size) -> {
-                val pair = landPair!!
-                Route("LAND", pair.first.name, pair.second.name, land)
-            }
-            sea.isNotEmpty() -> {
-                val pair = seaPair!!
-                Route("SEA", pair.first.name, pair.second.name, sea)
-            }
-            else -> {
-                val pair = landPair ?: seaPair
-                Route("UNRESOLVED", pair?.first?.name.orEmpty(), pair?.second?.name.orEmpty(), emptyList())
-            }
-        }
-    }
-
-    private fun closestPair(
-        seller: Civilization,
-        buyer: Civilization,
-        coastalOnly: Boolean
-    ): Pair<City, City>? {
-        var best: Pair<City, City>? = null
-        var shortest = Int.MAX_VALUE
-        for (from in seller.cities) {
-            val start = from.getCenterTile()
-            if (coastalOnly && start.neighbors.none { it.isWater && !it.isImpassible() }) continue
-            for (to in buyer.cities) {
-                val end = to.getCenterTile()
-                if (coastalOnly && end.neighbors.none { it.isWater && !it.isImpassible() }) continue
-                val distance = start.aerialDistanceTo(end)
-                if (distance < shortest) {
-                    best = Pair(from, to)
-                    shortest = distance
-                }
-            }
-        }
-        return best
-    }
-
-    private fun cached(
-        seller: Civilization,
-        from: City,
-        to: City,
-        mode: String,
-        compute: () -> List<HexCoord>
-    ): List<HexCoord> {
-        val key = "${seller.gameInfo.gameId}|$mode|${from.id}|${to.id}"
+        val game = seller.gameInfo
+        val key = "${game.gameId}|${game.turns}|${seller.civID}|${buyer.civID}"
         synchronized(cache) {
             cache[key]?.let { return it }
-            val route = compute()
+            val result = calculate(seller, buyer)
             if (cache.size >= MaxCacheSize) cache.remove(cache.keys.first())
-            cache[key] = route
-            return route
+            cache[key] = result
+            return result
         }
     }
 
-    private fun search(
-        starts: List<Tile>,
-        targets: Set<Tile>,
-        passable: (Tile) -> Boolean
-    ): List<HexCoord> {
-        if (starts.isEmpty() || targets.isEmpty()) return emptyList()
+    private fun calculate(seller: Civilization, buyer: Civilization): Route {
+        // Using the actual tile as key prevents misleading straight-line pairing.
+        val startCities = LinkedHashMap<Tile, City>()
+        val endCities = LinkedHashMap<Tile, City>()
+        for (city in seller.cities) {
+            val tile = city.getCenterTile()
+            if (tile.isLand && !tile.isImpassible()) startCities[tile] = city
+        }
+        for (city in buyer.cities) {
+            val tile = city.getCenterTile()
+            if (tile.isLand && !tile.isImpassible()) endCities[tile] = city
+        }
+
+        if (startCities.isEmpty() || endCities.isEmpty()) return unresolved(seller, buyer)
+        val targetTiles = endCities.keys
         val queue = ArrayDeque<Tile>()
-        val parent = HashMap<Tile, Tile?>()
-        for (start in starts) {
-            if (!passable(start) || parent.containsKey(start)) continue
-            parent[start] = null
+        val predecessor = HashMap<Tile, Tile?>()
+
+        // Multi-source BFS finds the shortest number of map edges among every
+        // candidate seller-city/buyer-city pair, not merely one aerially closest pair.
+        for (start in startCities.keys) {
+            predecessor[start] = null
             queue.addLast(start)
         }
         while (queue.isNotEmpty()) {
-            val tile = queue.removeFirst()
-            if (tile in targets) {
-                val result = ArrayList<HexCoord>()
-                var current: Tile? = tile
-                while (current != null) {
-                    result.add(current.position)
-                    current = parent[current]
+            val current = queue.removeFirst()
+            if (current in targetTiles) {
+                val path = ArrayList<Tile>()
+                var step: Tile? = current
+                while (step != null) {
+                    path.add(step)
+                    step = predecessor[step]
                 }
-                result.reverse()
-                return result
+                path.reverse()
+                val water = path.any { it.isWater }
+                val inlandLeg = path.drop(1).dropLast(1).any { it.isLand }
+                val mode = when {
+                    !water -> "LAND"
+                    inlandLeg -> "MIXED"
+                    else -> "SEA"
+                }
+                return Route(
+                    mode,
+                    startCities[path.first()]?.name.orEmpty(),
+                    endCities[path.last()]?.name.orEmpty(),
+                    path.map { it.position }
+                )
             }
-            if (parent.size >= MaxVisitedTiles) return emptyList()
-            for (next in tile.neighbors) {
-                if (!passable(next) || parent.containsKey(next)) continue
-                parent[next] = tile
+            if (predecessor.size >= MaxVisitedTiles) break
+            for (next in current.neighbors) {
+                if (next in predecessor || !passable(next)) continue
+                // A shoreline isn't itself a harbor: only coastal cities can
+                // load, unload or transfer between land and water.
+                if (current.isLand != next.isLand) {
+                    val harbor = if (current.isLand) current else next
+                    if (!harbor.isCityCenter()) continue
+                }
+                predecessor[next] = current
                 queue.addLast(next)
             }
         }
-        return emptyList()
+        return unresolved(seller, buyer)
     }
+
+    private fun passable(tile: Tile): Boolean =
+        !tile.isImpassible() && (tile.isLand || tile.isWater)
+
+    private fun unresolved(seller: Civilization, buyer: Civilization) = Route(
+        "UNRESOLVED",
+        seller.getCapital()?.name.orEmpty(),
+        buyer.getCapital()?.name.orEmpty(),
+        emptyList()
+    )
 }

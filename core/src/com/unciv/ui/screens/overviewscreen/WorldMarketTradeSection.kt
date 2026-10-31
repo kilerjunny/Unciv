@@ -142,6 +142,7 @@ class WorldMarketTradeSection(
                     val routeLabel = when (it.routeMode) {
                         "LAND" -> "육로"
                         "SEA" -> "항로"
+                        "MIXED" -> "복합(육해상)"
                         else -> "경로 미확인"
                     }
                     val endpoints = if (it.originCityName.isNotBlank() && it.destinationCityName.isNotBlank())
