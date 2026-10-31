@@ -16,6 +16,7 @@ import com.unciv.logic.market.WorldMarketRouteStats
 import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.translations.tr
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
+import com.unciv.logic.automation.civilization.GrandStrategyThermal
 import com.unciv.ui.components.extensions.toLabel
 import com.unciv.ui.components.input.onClick
 import com.unciv.ui.images.ImageGetter
@@ -133,6 +134,17 @@ class WorldMarketTradeSection(
         }
 
         if (performanceOpen) {
+            // GS_THERMAL_MONITOR_V1: Refresh only on tap, not every render frame.
+            val refresh = TextButton("발열 새로고침", BaseScreen.skin)
+            refresh.onClick {
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            add(refresh).left().row()
+            for (line in GrandStrategyThermal.reportLines()) {
+                add(line.toLabel(hideIcons = true)).left().row()
+            }
+            add("---- 기존 턴 성능 진단 ----".toLabel(hideIcons = true)).left().row()
             val gameId = playerView.getCiv().gameInfo.gameId
             for (line in GrandStrategyPerf.reportLines(gameId)) {
                 add(line.toLabel(hideIcons = true)).left().row()

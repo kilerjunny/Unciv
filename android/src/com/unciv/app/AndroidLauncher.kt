@@ -1,8 +1,15 @@
 package com.unciv.app
 
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.MediaScannerConnection
+import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.view.View
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.ViewCompat
@@ -11,6 +18,7 @@ import androidx.work.WorkManager
 import com.badlogic.gdx.backends.android.AndroidApplication
 import com.badlogic.gdx.backends.android.AndroidApplicationConfiguration
 import com.unciv.logic.IdChecker
+import com.unciv.logic.automation.civilization.GrandStrategyThermal
 import com.unciv.logic.files.SAVE_FILES_FOLDER
 import com.unciv.logic.files.UncivFiles
 import com.unciv.ui.components.fonts.Fonts
@@ -29,6 +37,50 @@ import kotlinx.coroutines.launch
 open class AndroidLauncher : AndroidApplication() {
 
     private var game: AndroidGame? = null
+
+    // GS_THERMAL_MONITOR_V1: Sampling only while the Activity is resumed, 1 read/15 seconds.
+    // Does not keep the screen on, create a service, or run while the game is paused.
+    private val thermalHandler = Handler(Looper.getMainLooper())
+    private val thermalTask = object : Runnable {
+        override fun run() {
+            sampleThermalState()
+            thermalHandler.postDelayed(this, 15_000L)
+        }
+    }
+
+    private fun startThermalSampling() {
+        thermalHandler.removeCallbacks(thermalTask)
+        thermalTask.run()
+    }
+
+    private fun stopThermalSampling() {
+        thermalHandler.removeCallbacks(thermalTask)
+    }
+
+    private fun sampleThermalState() {
+        // ACTION_BATTERY_CHANGED is sticky: no broadcast receiver registration needed.
+        val battery = try {
+            applicationContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        } catch (_: Exception) {
+            null
+        }
+        val rawTemp = battery?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        val tempC = if (rawTemp > 0 && rawTemp < 1000) rawTemp / 10f else null
+        val batteryStatus = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging: Boolean? = when (batteryStatus) {
+            BatteryManager.BATTERY_STATUS_CHARGING, BatteryManager.BATTERY_STATUS_FULL -> true
+            BatteryManager.BATTERY_STATUS_DISCHARGING, BatteryManager.BATTERY_STATUS_NOT_CHARGING -> false
+            else -> null
+        }
+        val thermalLevel: Int? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                (getSystemService(Context.POWER_SERVICE) as? PowerManager)?.currentThermalStatus
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+        GrandStrategyThermal.record(tempC, thermalLevel, charging)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,6 +178,7 @@ open class AndroidLauncher : AndroidApplication() {
     }
 
     override fun onPause() {
+        stopThermalSampling()
         val game = this.game!!
         if (game.isInitializedProxy()
                 && game.gameInfo != null
@@ -156,6 +209,12 @@ open class AndroidLauncher : AndroidApplication() {
                cancel should not be enough of a reason for the game to crash! */
         }
         super.onResume()
+        startThermalSampling()
+    }
+
+    override fun onDestroy() {
+        stopThermalSampling()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent?) {
