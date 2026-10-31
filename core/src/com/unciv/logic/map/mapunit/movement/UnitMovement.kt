@@ -975,6 +975,12 @@ class UnitMovement(val unit: MapUnit) {
         return bfs.getReachedTiles()
     }
 
+    /** GS_UNIT_PATH_CACHE_V1: Invalidate cached BFS routes at the start of each AI decision.
+     *  This avoids reusing paths after other units moved, without clearing A* caches. */
+    fun resetPathCacheForAiDecision() {
+        pathfindingCache.clear()
+    }
+
     fun clearPathfindingCache() {
         pathfindingCache.clear()
         aStarPathing.clear()
@@ -995,37 +1001,49 @@ class UnitMovement(val unit: MapUnit) {
  * the result since otherwise this is a redundant calculation that will find the same path.
  */
 class PathfindingCache(private val unit: MapUnit) {
-    private var shortestPathCache = listOf<Tile>()
-    private var destination: Tile? = null
+    // GS_UNIT_PATH_CACHE_V1: Keep a tiny LRU of positive routes within ONE AI decision.
+    // Negative paths are deliberately not reused; obstacles can change as units move.
+    private val shortestPaths = LinkedHashMap<Tile, List<Tile>>(4, 0.75f, true)
     private var movement = -1f
     private var currentTile: Tile? = null
+    private var turn = -1
+    private val maxPaths = 4
 
-    /** Check if the caches are valid (only checking if the unit has moved or consumed movement points;
-     * the isPlayerCivilization check is performed in the functions because we want isValid() == false
-     * to have a specific behavior) */
-    @Readonly private fun isValid(): Boolean = (movement == unit.currentMovement) && (unit.getTile() == currentTile)
+    @Readonly private fun isValid(): Boolean =
+        movement == unit.currentMovement &&
+            currentTile == unit.getTile() &&
+            turn == unit.civ.gameInfo.turns
 
     fun getShortestPathCache(destination: Tile): List<Tile> {
-        if (unit.civ.isHuman()) return listOf()
-        if (isValid() && this.destination == destination) {
-            return shortestPathCache
-        }
-        return listOf()
+        if (unit.civ.isHuman()) return emptyList()
+        if (!isValid()) clear()
+        val result = shortestPaths[destination] ?: return emptyList()
+        if (result.isNotEmpty())
+            GrandStrategyPerf.addCount("unit_path_cache_hits", 1)
+        return result
     }
 
     fun setShortestPathCache(destination: Tile, newShortestPath: List<Tile>) {
         if (unit.civ.isHuman()) return
-        if (isValid()) {
-            shortestPathCache = newShortestPath
-            this.destination = destination
+        if (!isValid()) clear()
+        // An empty result is not safe to remember across changing unit occupancy.
+        if (newShortestPath.isEmpty()) {
+            shortestPaths.remove(destination)
+            return
+        }
+        shortestPaths[destination] = newShortestPath
+        if (shortestPaths.size > maxPaths) {
+            val oldest = shortestPaths.keys.iterator()
+            oldest.next()
+            oldest.remove()
         }
     }
 
     fun clear() {
         movement = unit.currentMovement
         currentTile = unit.getTile()
-        destination = null
-        shortestPathCache = listOf()
+        turn = unit.civ.gameInfo.turns
+        shortestPaths.clear()
     }
 }
 

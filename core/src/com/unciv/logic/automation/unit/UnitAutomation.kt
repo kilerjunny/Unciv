@@ -38,6 +38,9 @@ object UnitAutomation {
 
     fun automateUnitMoves(unit: MapUnit):Unit = timeThis("automateUnitMoves") {
         check(!unit.civ.isBarbarian) { "Barbarians is not allowed here." }
+        // GS_UNIT_PATH_CACHE_V1: Other units may have moved since this unit last acted.
+        // Reset only the small cached BFS routes, never movement points or decisions.
+        if (unit.civ.isAI()) unit.movement.resetPathCacheForAiDecision()
 
         // Might die next turn - move!
         if (unit.getDamageFromTerrain() > 0 && tryHealUnit(unit)) return

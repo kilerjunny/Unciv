@@ -158,6 +158,8 @@ object GrandStrategyPerf {
         item("일반 이동 - 항공/핵", "unit_air")
         item("일반 이동 - 지상/해상", "unit_military")
         item("경로 탐색 (중첩 제외)", "unit_pathfinding")
+        // GS_UNIT_PATH_CACHE_V1: Diagnostics only; no extra full path searches.
+        lines.add("최단경로 캐시 적중: ${result.counts["unit_path_cache_hits"] ?: 0}회 (판단당 최대 4개 경로)")
         item("근접 공격 판단", "unit_attack_scan")
         item("적 도시 목표 탐색", "unit_city_target")
         item("적 접근 판단", "unit_attack_advance")
