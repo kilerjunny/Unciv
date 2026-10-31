@@ -26,6 +26,7 @@ import com.unciv.logic.market.MilitaryMarketContract
 import com.unciv.logic.market.MilitaryMarketHistoryEntry
 import com.unciv.logic.market.MilitaryMarketListing
 import com.unciv.logic.market.MarketTradeRecord
+import com.unciv.logic.market.MarketRouteStat
 import com.unciv.logic.map.MapShape
 import com.unciv.logic.map.TileMap
 import com.unciv.logic.map.tile.Tile
@@ -113,6 +114,11 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     var civilizations = ArrayList<Civilization>()
     var worldMarketOrders = ArrayList<MarketSellOrder>()
     var worldMarketHistory = ArrayList<MarketTradeRecord>()
+    // GS_TRADE_MAP_SPEED_V1: persistent, bounded traffic summary
+    var worldMarketRouteStats = ArrayList<MarketRouteStat>()
+    var worldMarketRouteLifetime = ArrayList<MarketRouteStat>()
+    var worldMarketStatsInitialized = false
+    var worldMarketRouteLifetimeTruncated = false
     var militaryMarketContracts = ArrayList<MilitaryMarketContract>()
     var militaryMarketHistory = ArrayList<MilitaryMarketHistoryEntry>()
     var militaryMarketListings = ArrayList<MilitaryMarketListing>()
@@ -217,6 +223,10 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
             worldMarketOrders.map { it.copy() }
         )
         toReturn.worldMarketHistory.addAll(worldMarketHistory.takeLast(100).map { it.copy() })
+        toReturn.worldMarketRouteStats.addAll(worldMarketRouteStats.map { it.copy(routeTiles = ArrayList(it.routeTiles)) })
+        toReturn.worldMarketRouteLifetime.addAll(worldMarketRouteLifetime.map { it.copy(routeTiles = ArrayList(it.routeTiles)) })
+        toReturn.worldMarketStatsInitialized = worldMarketStatsInitialized
+        toReturn.worldMarketRouteLifetimeTruncated = worldMarketRouteLifetimeTruncated
         toReturn.militaryMarketContracts.addAll(militaryMarketContracts.map { it.copy() })
         toReturn.militaryMarketHistory.addAll(militaryMarketHistory.takeLast(100).map { it.copy() })
         toReturn.militaryMarketListings.addAll(militaryMarketListings.map { it.copy() })

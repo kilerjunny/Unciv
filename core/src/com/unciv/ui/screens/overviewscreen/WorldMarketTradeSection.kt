@@ -12,6 +12,7 @@ import com.unciv.logic.market.WorldMarket
 import com.unciv.logic.market.WorldMarketTrading
 import com.unciv.logic.market.WorldMarketOrderPurchase
 import com.unciv.logic.market.WorldMarketHistory
+import com.unciv.logic.market.WorldMarketRouteStats
 import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.translations.tr
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
@@ -30,6 +31,10 @@ class WorldMarketTradeSection(
     private var historyOpen = false
     private var performanceOpen = false
     private var militaryMarketOpen = false
+    private var tradeMapOpen = false
+    private var tradeMapOnlyMine = false
+    private var tradeMapLifetime = false
+    private var tradeMapMode = "ALL"
     private var message = ""
     // GS_WORLD_MARKET_V14_SEARCH
     private var resourceSearch = ""
@@ -79,10 +84,19 @@ class WorldMarketTradeSection(
 
         if (!expanded) return
 
+        val tradeMapButton = TextButton(if (tradeMapOpen) "시장 보기" else "무역 지도", BaseScreen.skin)
+        tradeMapButton.onClick {
+            tradeMapOpen = !tradeMapOpen
+            if (tradeMapOpen) { historyOpen = false; performanceOpen = false; militaryMarketOpen = false }
+            render()
+            parentTab.overviewScreen.resizePage(parentTab)
+        }
+        add(tradeMapButton).left().row()
+
         val historyButton = TextButton(if (historyOpen) "시장 보기" else "거래 내역", BaseScreen.skin)
         historyButton.onClick {
             historyOpen = !historyOpen
-            if (historyOpen) { performanceOpen = false; militaryMarketOpen = false }
+            if (historyOpen) { performanceOpen = false; militaryMarketOpen = false; tradeMapOpen = false }
             render()
             parentTab.overviewScreen.resizePage(parentTab)
         }
@@ -94,7 +108,7 @@ class WorldMarketTradeSection(
         )
         perfButton.onClick {
             performanceOpen = !performanceOpen
-            if (performanceOpen) { historyOpen = false; militaryMarketOpen = false }
+            if (performanceOpen) { historyOpen = false; militaryMarketOpen = false; tradeMapOpen = false }
             render()
             parentTab.overviewScreen.resizePage(parentTab)
         }
@@ -105,7 +119,7 @@ class WorldMarketTradeSection(
         )
         militaryButton.onClick {
             militaryMarketOpen = !militaryMarketOpen
-            if (militaryMarketOpen) { historyOpen = false; performanceOpen = false }
+            if (militaryMarketOpen) { historyOpen = false; performanceOpen = false; tradeMapOpen = false }
             render()
             parentTab.overviewScreen.resizePage(parentTab)
         }
@@ -122,6 +136,76 @@ class WorldMarketTradeSection(
             for (line in GrandStrategyPerf.reportLines(gameId)) {
                 add(line.toLabel(hideIcons = true)).left().row()
             }
+            return
+        }
+
+        // GS_TRADE_MAP_SPEED_V1: geographic summary; never runs the route planner.
+        if (tradeMapOpen) {
+            val viewer = playerView.getCiv()
+            val game = viewer.gameInfo
+            val spectator = playerView.isSpectator()
+            val window = WorldMarketRouteStats.windowTurns(game)
+            val scopeButton = TextButton(if (tradeMapOnlyMine) "내 거래만 ✓" else "전체 국가", BaseScreen.skin)
+            scopeButton.onClick {
+                tradeMapOnlyMine = !tradeMapOnlyMine
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            val periodButton = TextButton(if (tradeMapLifetime) "기록 전체" else "최근 ${window}턴", BaseScreen.skin)
+            periodButton.onClick {
+                tradeMapLifetime = !tradeMapLifetime
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            val modeButton = TextButton(when (tradeMapMode) {
+                "LAND" -> "육로만"
+                "SEA" -> "항로만"
+                "MIXED" -> "복합만"
+                else -> "모든 경로"
+            }, BaseScreen.skin)
+            modeButton.onClick {
+                tradeMapMode = when (tradeMapMode) {
+                    "ALL" -> "LAND"
+                    "LAND" -> "SEA"
+                    "SEA" -> "MIXED"
+                    else -> "ALL"
+                }
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            val switches = Table(BaseScreen.skin)
+            switches.add(periodButton).padRight(5f)
+            switches.add(scopeButton).padRight(5f)
+            switches.add(modeButton)
+            add(switches).left().row()
+
+            val knownIds = viewer.getKnownCivs().map { it.civID }.toSet() + viewer.civID
+            val entries = (if (tradeMapLifetime) WorldMarketRouteStats.lifetimeRows(game)
+                else WorldMarketRouteStats.windowRows(game))
+                .filter { row ->
+                    (spectator || (row.sellerCivId in knownIds && row.buyerCivId in knownIds)) &&
+                    (!tradeMapOnlyMine || row.sellerCivId == viewer.civID || row.buyerCivId == viewer.civID) &&
+                    (tradeMapMode == "ALL" || row.routeMode == tradeMapMode)
+                }
+                .sortedByDescending { it.tradeCount }
+            val visible = entries.take(60)
+            val summary = "거래 ${entries.sumOf { it.tradeCount }}건 · 물동량 ${entries.sumOf { it.quantity }}개 · " +
+                "교역로 ${entries.size}개 집계 항목 (최대 60개 경로 표시)"
+            add(summary.toLabel(hideIcons = true)).left().growX().row()
+            if (game.worldMarketRouteLifetimeTruncated && tradeMapLifetime)
+                add("전체 누적 통계는 경로 400개 보존 제한으로 일부 누락되었습니다.".toLabel(hideIcons = true))
+                    .left().growX().row()
+            if (entries.isEmpty())
+                add("표시할 무역로가 없습니다. 신규 세계 시장 거래 이후 기록됩니다.".toLabel(hideIcons = true))
+                    .left().growX().row()
+            val mapWidth = (parentTab.overviewScreen.stage.width - 65f).coerceIn(320f, 1100f)
+            val mapHeight = (mapWidth * 0.54f).coerceIn(220f, 520f)
+            add(WorldMarketRouteMapActor(game, viewer, spectator, visible))
+                .width(mapWidth).height(mapHeight).left().row()
+            add("육로: 노랑 · 항로: 하늘색 · 복합: 분홍 · 선 굵기: 거래 횟수".toLabel(hideIcons = true))
+                .left().growX().row()
+            add("탐험한 지도 칸만 표시하며, 과거 저장파일은 최근 거래 100건부터 복원됩니다.".toLabel(hideIcons = true))
+                .left().growX().row()
             return
         }
 
