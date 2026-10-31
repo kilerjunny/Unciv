@@ -23,11 +23,13 @@ class WorldMarketRouteMapActor(
     game: GameInfo,
     viewer: Civilization,
     spectator: Boolean,
-    routes: List<MarketRouteStat>
+    routes: List<MarketRouteStat>,
+    private val lowPower: Boolean = true
 ) : Actor() {
     private data class Dot(val worldX: Float, val worldY: Float, val water: Boolean)
     private data class Segment(val fromX: Float, val fromY: Float, val toX: Float, val toY: Float)
-    private data class PaintedRoute(val type: String, val count: Int, val segments: List<Segment>)
+    private data class PaintedRoute(val type: String, var count: Int, val segments: List<Segment>)
+    private data class EdgeKey(val mode: String, val a: HexCoord, val b: HexCoord)
 
     private val dots = ArrayList<Dot>()
     private val lines = ArrayList<PaintedRoute>()
@@ -44,21 +46,34 @@ class WorldMarketRouteMapActor(
 
     init {
         val world = game.tileMap
-        // Derive fixed geographic bounds from the full map, without revealing unexplored land.
+        // GS_TRADE_MAP_COOL_V1: Bound per-frame draw work on Android.
+        // Counts are computed on map opening, never inside draw().
+        val exploredCount = if (lowPower)
+            world.tileList.count { spectator || it.isExplored(viewer) }
+        else 0
+        val sampleEvery = if (lowPower) ((exploredCount + 1599) / 1600).coerceAtLeast(1) else 1
+        var exploredIndex = 0
+        // Bounds are still calculated over the entire world, preserving map geometry.
         for (tile in world.tileList) {
             val point = HexMath.hex2WorldCoords(tile.position)
             minX = min(minX, point.x)
             maxX = max(maxX, point.x)
             minY = min(minY, point.y)
             maxY = max(maxY, point.y)
-            if (spectator || tile.isExplored(viewer))
-                dots.add(Dot(point.x, point.y, tile.isWater))
+            if (spectator || tile.isExplored(viewer)) {
+                if (exploredIndex % sampleEvery == 0)
+                    dots.add(Dot(point.x, point.y, tile.isWater))
+                exploredIndex++
+            }
         }
         if (world.tileList.isEmpty()) {
             minX = 0f; maxX = 1f; minY = 0f; maxY = 1f
         }
+        // Multiple trade routes often share the same road/sea hex edge.
+        // Draw each edge once, with a thicker stroke for accumulated traffic.
+        // The key is directionless, so A→B and B→A overlap instead of stacking.
+        val edges = LinkedHashMap<EdgeKey, PaintedRoute>()
         for (route in routes) {
-            val segments = ArrayList<Segment>()
             val points: List<HexCoord> = route.routeTiles
             for (i in 0 until points.size - 1) {
                 val a = points[i]
@@ -69,12 +84,23 @@ class WorldMarketRouteMapActor(
                 if (!spectator && (!tileA.isExplored(viewer) || !tileB.isExplored(viewer))) continue
                 val p = HexMath.hex2WorldCoords(a)
                 val q = HexMath.hex2WorldCoords(b)
-                // Don't draw an erroneous line across the world-wrap seam.
+                // Avoid fake lines across the horizontal world wrap.
                 if (hypot((p.x - q.x).toDouble(), (p.y - q.y).toDouble()) > 3.0) continue
-                segments.add(Segment(p.x, p.y, q.x, q.y))
+                val ordered = a.x < b.x || (a.x == b.x && a.y <= b.y)
+                val key = if (ordered) EdgeKey(route.routeMode, a, b)
+                    else EdgeKey(route.routeMode, b, a)
+                val existing = edges[key]
+                if (existing == null) {
+                    edges[key] = PaintedRoute(
+                        route.routeMode, route.tradeCount.coerceAtLeast(1),
+                        listOf(Segment(p.x, p.y, q.x, q.y))
+                    )
+                } else {
+                    existing.count += route.tradeCount.coerceAtLeast(1)
+                }
             }
-            if (segments.isNotEmpty()) lines.add(PaintedRoute(route.routeMode, route.tradeCount, segments))
         }
+        lines.addAll(edges.values)
     }
 
     override fun draw(batch: Batch, parentAlpha: Float) {

@@ -35,6 +35,7 @@ class WorldMarketTradeSection(
     private var tradeMapOnlyMine = false
     private var tradeMapLifetime = false
     private var tradeMapMode = "ALL"
+    private var tradeMapLowPower = true // GS_TRADE_MAP_COOL_V1: default low heat on mobile
     private var message = ""
     // GS_WORLD_MARKET_V14_SEARCH
     private var resourceSearch = ""
@@ -178,6 +179,14 @@ class WorldMarketTradeSection(
             switches.add(scopeButton).padRight(5f)
             switches.add(modeButton)
             add(switches).left().row()
+            // A separate row avoids overflowing narrow Android landscape layouts.
+            val powerButton = TextButton(if (tradeMapLowPower) "절전 모드 ✓" else "절전 모드 OFF", BaseScreen.skin)
+            powerButton.onClick {
+                tradeMapLowPower = !tradeMapLowPower
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            add(powerButton).left().row()
 
             val knownIds = viewer.getKnownCivs().map { it.civID }.toSet() + viewer.civID
             val entries = (if (tradeMapLifetime) WorldMarketRouteStats.lifetimeRows(game)
@@ -188,9 +197,10 @@ class WorldMarketTradeSection(
                     (tradeMapMode == "ALL" || row.routeMode == tradeMapMode)
                 }
                 .sortedByDescending { it.tradeCount }
-            val visible = entries.take(60)
+            val displayLimit = if (tradeMapLowPower) 24 else 60
+            val visible = entries.take(displayLimit)
             val summary = "거래 ${entries.sumOf { it.tradeCount }}건 · 물동량 ${entries.sumOf { it.quantity }}개 · " +
-                "교역로 ${entries.size}개 집계 항목 (최대 60개 경로 표시)"
+                "교역로 ${entries.size}개 집계 항목 (최대 ${displayLimit}개 경로 표시)"
             add(summary.toLabel(hideIcons = true)).left().growX().row()
             if (game.worldMarketRouteLifetimeTruncated && tradeMapLifetime)
                 add("전체 누적 통계는 경로 400개 보존 제한으로 일부 누락되었습니다.".toLabel(hideIcons = true))
@@ -200,7 +210,7 @@ class WorldMarketTradeSection(
                     .left().growX().row()
             val mapWidth = (parentTab.overviewScreen.stage.width - 65f).coerceIn(320f, 1100f)
             val mapHeight = (mapWidth * 0.54f).coerceIn(220f, 520f)
-            add(WorldMarketRouteMapActor(game, viewer, spectator, visible))
+            add(WorldMarketRouteMapActor(game, viewer, spectator, visible, tradeMapLowPower))
                 .width(mapWidth).height(mapHeight).left().row()
             add("육로: 노랑 · 항로: 하늘색 · 복합: 분홍 · 선 굵기: 거래 횟수".toLabel(hideIcons = true))
                 .left().growX().row()
