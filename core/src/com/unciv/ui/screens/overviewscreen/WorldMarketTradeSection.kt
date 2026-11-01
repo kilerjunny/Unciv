@@ -244,6 +244,9 @@ class WorldMarketTradeSection(
             val mainRoutes = WorldMarketMainRoutes.select(game, globalRows)
             add("세계 주무역로 ${mainRoutes.size}/${maximumMain}개 · 최근 ${window}턴 전 세계 교역량 기준".toLabel(hideIcons = true))
                 .left().growX().row()
+            // GS_CONNECTED_TRADE_BACKBONE_V2: summary only, never new pathfinding.
+            add("연속 주무역로 총 ${mainRoutes.sumOf { it.tiles.size - 1 }}칸 · 긴 공유 항로 중심 선정".toLabel(hideIcons = true))
+                .left().growX().row()
             val displayLimit = if (tradeMapLowPower) 24 else 60
             val visible = if (tradeMapMainOnly) emptyList() else entries.take(displayLimit)
             val summary = "거래 ${entries.sumOf { it.tradeCount }}건 · 물동량 ${entries.sumOf { it.quantity }}개 · " +

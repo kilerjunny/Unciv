@@ -20,7 +20,9 @@ object WorldMarketEconomicRoutePlanner {
     data class Result(val tiles: List<Tile>, val estimatedCost: Int)
 
     private data class Edge(val a: HexCoord, val b: HexCoord)
-    private data class SearchNode(val tile: Tile, val cost: Int)
+    // GS_CONNECTED_TRADE_BACKBONE_V2: prefer a main line on equal-cost routes.
+    private data class SearchNode(val tile: Tile, val cost: Int, val mainSteps: Int)
+    private data class Score(val cost: Int, val mainSteps: Int)
 
     // These are provisional balance values, NOT gold/turn or charged transport fees.
     private const val InlandStep = 12
@@ -54,22 +56,23 @@ object WorldMarketEconomicRoutePlanner {
     fun find(game: GameInfo, origins: Collection<Tile>, destinations: Set<Tile>): Result? {
         if (origins.isEmpty() || destinations.isEmpty()) return null
         val main = mainEdges(game)
-        val best = HashMap<Tile, Int>()
+        val best = HashMap<Tile, Score>()
         val parent = HashMap<Tile, Tile?>()
         val queue = PriorityQueue<SearchNode>(compareBy<SearchNode> { it.cost }
+            .thenByDescending { it.mainSteps }
             .thenBy { it.tile.position.x }.thenBy { it.tile.position.y })
 
         for (start in origins) {
             if (start in best) continue
-            best[start] = 0
+            best[start] = Score(0, 0)
             parent[start] = null
-            queue.add(SearchNode(start, 0))
+            queue.add(SearchNode(start, 0, 0))
         }
 
         var settled = 0
         while (queue.isNotEmpty() && settled < MaxSettledTiles) {
             val current = queue.poll()
-            if (best[current.tile] != current.cost) continue // stale queue entry
+            if (best[current.tile] != Score(current.cost, current.mainSteps)) continue // stale queue entry
             settled++
             if (current.tile in destinations) {
                 val reversed = ArrayList<Tile>()
@@ -90,11 +93,16 @@ object WorldMarketEconomicRoutePlanner {
                     if (!harbor.isCityCenter()) continue
                 }
                 val nextCost = current.cost + stepCost(current.tile, next, main)
-                val previousCost = best[next]
-                if (previousCost == null || nextCost < previousCost) {
-                    best[next] = nextCost
+                val nextMain = current.mainSteps +
+                    (if (edge(current.tile.position, next.position) in main) 1 else 0)
+                val previous = best[next]
+                // Cost remains the PRIMARY objective. A connected main corridor
+                // only wins a tie, never a more-expensive alternative.
+                if (previous == null || nextCost < previous.cost ||
+                    (nextCost == previous.cost && nextMain > previous.mainSteps)) {
+                    best[next] = Score(nextCost, nextMain)
                     parent[next] = current.tile
-                    queue.add(SearchNode(next, nextCost))
+                    queue.add(SearchNode(next, nextCost, nextMain))
                 }
             }
         }

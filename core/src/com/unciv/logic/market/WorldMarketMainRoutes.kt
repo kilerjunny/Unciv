@@ -23,7 +23,7 @@ object WorldMarketMainRoutes {
     private data class Edge(val a: HexCoord, val b: HexCoord)
     private class Traffic(var trades: Int = 0, var quantity: Int = 0)
     private const val MaxCorridorLength = 256
-    private const val MinCorridorEdges = 4
+    private const val MinCorridorEdges = 8
     private const val MaxInputRows = 600 // Bound map-opening CPU/memory use on Android.
 
     /** Radius 40 hex map = 4,681 tiles -> 8; radius 50 -> 10.
@@ -38,77 +38,93 @@ object WorldMarketMainRoutes {
     fun select(game: GameInfo, rows: List<MarketRouteStat>): List<MainTradeCorridor> =
         selectRows(rows, maximumCount(game))
 
+    // GS_CONNECTED_TRADE_BACKBONE_V2
+    // A main corridor follows a CONTINUOUS piece of an actual observed trade
+    // route, including the lightly-used bridge between shared sections.
+    // This avoids drawing small unrelated traffic fragments as main lines.
     internal fun selectRows(rows: List<MarketRouteStat>, maximum: Int): List<MainTradeCorridor> {
         if (maximum <= 0) return emptyList()
+        // The input is deliberately capped. The only work done during turns is
+        // on the first economic path request, which already caches the result.
+        val inputs = rows.asSequence()
+            .filter { it.tradeCount > 0 && it.routeTiles.size in (MinCorridorEdges + 1)..(MaxCorridorLength + 1) }
+            .sortedWith(compareByDescending<MarketRouteStat> { it.tradeCount }
+                .thenBy { it.sellerCivId }.thenBy { it.buyerCivId }
+                .thenBy { it.routeHash })
+            .take(MaxInputRows).toList()
+        if (inputs.isEmpty()) return emptyList()
+
         val traffic = HashMap<Edge, Traffic>()
-        for (row in rows.sortedByDescending { it.tradeCount }.take(MaxInputRows)) {
-            if (row.tradeCount <= 0 || row.routeTiles.size < 2) continue
-            for (i in 0 until row.routeTiles.size - 1) {
-                val a = row.routeTiles[i]
-                val b = row.routeTiles[i + 1]
-                if (a == b) continue
-                val key = edge(a, b)
-                val flow = traffic.getOrPut(key) { Traffic() }
-                flow.trades += row.tradeCount
-                flow.quantity += row.quantity.coerceAtLeast(0)
-            }
+        for (row in inputs) for (i in 0 until row.routeTiles.size - 1) {
+            val a = row.routeTiles[i]
+            val b = row.routeTiles[i + 1]
+            if (a == b) continue
+            val flow = traffic.getOrPut(edge(a, b)) { Traffic() }
+            flow.trades += row.tradeCount
+            flow.quantity += row.quantity.coerceAtLeast(0)
         }
         if (traffic.isEmpty()) return emptyList()
-
         val peak = traffic.values.maxOf { it.trades }
-        // Shared traffic is essential. Higher-flow networks require stronger
-        // segments to be included; avoids labeling every minor road as a trunk.
-        val minimum = maxOf(2, (peak * 0.35).roundToInt())
-        val strongEdges = traffic.keys.filter { traffic.getValue(it).trades >= minimum }
-        if (strongEdges.isEmpty()) return emptyList()
+        val threshold = maxOf(2, (peak * 0.35).roundToInt())
 
-        val adjacency = HashMap<HexCoord, MutableList<Edge>>()
-        for (edge in strongEdges) {
-            adjacency.getOrPut(edge.a) { ArrayList() }.add(edge)
-            adjacency.getOrPut(edge.b) { ArrayList() }.add(edge)
+        data class Candidate(val tiles: List<HexCoord>, val edges: List<Edge>, val mode: String)
+        val candidates = ArrayList<Candidate>()
+        for (row in inputs) {
+            val edges = (0 until row.routeTiles.size - 1).map { i ->
+                edge(row.routeTiles[i], row.routeTiles[i + 1])
+            }
+            // Find repeat-used parts of this authentic route; include the
+            // connecting lower-traffic segments so the resulting trunk is whole.
+            val strong = edges.indices.filter { (traffic[edges[it]]?.trades ?: 0) >= threshold }
+            if (strong.size < 4) continue
+            val first = strong.first()
+            val last = strong.last()
+            if (last - first + 1 < MinCorridorEdges) continue
+            val path = row.routeTiles.subList(first, last + 2).toList()
+            val pathEdges = edges.subList(first, last + 1).toList()
+            candidates.add(Candidate(path, pathEdges, row.routeMode))
         }
-        val byPriority = compareByDescending<Edge> { traffic.getValue(it).trades }
-            .thenByDescending { traffic.getValue(it).quantity }
-            .thenBy { it.a.x }.thenBy { it.a.y }.thenBy { it.b.x }.thenBy { it.b.y }
-        val sorted = strongEdges.sortedWith(byPriority)
-        val assigned = HashSet<Edge>()
-        val result = ArrayList<MainTradeCorridor>()
+        if (candidates.isEmpty()) return emptyList()
 
-        for (seed in sorted) {
-            if (result.size >= maximum) break
-            if (seed in assigned) continue
-            val points = ArrayList<HexCoord>()
-            points.add(seed.a)
-            points.add(seed.b)
-            val localEdges = HashSet<Edge>()
-            localEdges.add(seed)
-            val visited = HashSet<HexCoord>()
-            visited.add(seed.a)
-            visited.add(seed.b)
-
-            fun extend(atFront: Boolean) {
-                while (points.size - 1 < MaxCorridorLength) {
-                    val end = if (atFront) points.first() else points.last()
-                    val nextEdge = adjacency[end].orEmpty().asSequence()
-                        .filter { it !in assigned && it !in localEdges }
-                        .filter { other(it, end) !in visited }
-                        .sortedWith(byPriority)
-                        .firstOrNull() ?: break
-                    val next = other(nextEdge, end)
-                    if (atFront) points.add(0, next) else points.add(next)
-                    localEdges.add(nextEdge)
-                    visited.add(next)
+        val occupied = HashSet<Edge>()
+        val output = ArrayList<MainTradeCorridor>()
+        val used = BooleanArray(candidates.size)
+        while (output.size < maximum) {
+            var selected = -1
+            var highestScore = 0L
+            for (i in candidates.indices) {
+                if (used[i]) continue
+                val candidate = candidates[i]
+                var fresh = 0
+                var score = 0L
+                for (segment in candidate.edges) if (segment !in occupied) {
+                    fresh++
+                    val weight = traffic.getValue(segment)
+                    score += weight.trades * 5L + weight.quantity.coerceAtMost(10)
+                }
+                // A second trunk must be substantially independent; otherwise
+                // several overlapping versions of one international route use
+                // up all world slots.
+                if (fresh < MinCorridorEdges || fresh * 4 < candidate.edges.size) continue
+                // When actual traffic is comparable, favour sea-capable routes.
+                if (candidate.mode == "SEA" || candidate.mode == "MIXED")
+                    score = score * 11 / 10
+                if (score > highestScore) {
+                    highestScore = score
+                    selected = i
                 }
             }
-            extend(false)
-            extend(true)
-            if (localEdges.size < MinCorridorEdges) continue
-            val peakTrades = localEdges.maxOf { traffic.getValue(it).trades }
-            val totalSegmentTrades = localEdges.sumOf { traffic.getValue(it).trades }
-            assigned.addAll(localEdges)
-            result.add(MainTradeCorridor(points, peakTrades, totalSegmentTrades))
+            if (selected < 0) break
+            used[selected] = true
+            val chosen = candidates[selected]
+            occupied.addAll(chosen.edges)
+            output.add(MainTradeCorridor(
+                chosen.tiles,
+                chosen.edges.maxOf { traffic.getValue(it).trades },
+                chosen.edges.sumOf { traffic.getValue(it).trades }
+            ))
         }
-        return result
+        return output
     }
 
     private fun other(edge: Edge, one: HexCoord): HexCoord =
