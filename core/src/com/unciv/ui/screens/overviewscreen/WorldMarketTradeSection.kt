@@ -13,6 +13,7 @@ import com.unciv.logic.market.WorldMarketTrading
 import com.unciv.logic.market.WorldMarketOrderPurchase
 import com.unciv.logic.market.WorldMarketHistory
 import com.unciv.logic.market.WorldMarketRouteStats
+import com.unciv.logic.market.WorldMarketMainRoutes
 import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.translations.tr
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
@@ -37,6 +38,7 @@ class WorldMarketTradeSection(
     private var tradeMapLifetime = false
     private var tradeMapMode = "ALL"
     private var tradeMapLowPower = true // GS_TRADE_MAP_COOL_V1: default low heat on mobile
+    private var tradeMapMainOnly = false // GS_WORLD_MAIN_ROUTES_V1
     private var message = ""
     // GS_WORLD_MARKET_V14_SEARCH
     private var resourceSearch = ""
@@ -199,6 +201,18 @@ class WorldMarketTradeSection(
                 parentTab.overviewScreen.resizePage(parentTab)
             }
             add(powerButton).left().row()
+            // World routes share a global cap; player/country filters only affect
+            // ordinary route rendering, not corridor discovery.
+            val mainOnlyButton = TextButton(
+                if (tradeMapMainOnly) "주무역로만 ✓" else "일반 경로 + 주무역로",
+                BaseScreen.skin
+            )
+            mainOnlyButton.onClick {
+                tradeMapMainOnly = !tradeMapMainOnly
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            add(mainOnlyButton).left().row()
 
             val knownIds = viewer.getKnownCivs().map { it.civID }.toSet() + viewer.civID
             val entries = (if (tradeMapLifetime) WorldMarketRouteStats.lifetimeRows(game)
@@ -209,8 +223,15 @@ class WorldMarketTradeSection(
                     (tradeMapMode == "ALL" || row.routeMode == tradeMapMode)
                 }
                 .sortedByDescending { it.tradeCount }
+            // GS_WORLD_MAIN_ROUTES_V1: global backbone from observed world traffic.
+            // Compute only when opening/re-rendering the map, not during each turn or draw.
+            val globalRows = WorldMarketRouteStats.windowRows(game)
+            val maximumMain = WorldMarketMainRoutes.maximumCount(game)
+            val mainRoutes = WorldMarketMainRoutes.select(game, globalRows)
+            add("세계 주무역로 ${mainRoutes.size}/${maximumMain}개 · 최근 ${window}턴 전 세계 교역량 기준".toLabel(hideIcons = true))
+                .left().growX().row()
             val displayLimit = if (tradeMapLowPower) 24 else 60
-            val visible = entries.take(displayLimit)
+            val visible = if (tradeMapMainOnly) emptyList() else entries.take(displayLimit)
             val summary = "거래 ${entries.sumOf { it.tradeCount }}건 · 물동량 ${entries.sumOf { it.quantity }}개 · " +
                 "교역로 ${entries.size}개 집계 항목 (최대 ${displayLimit}개 경로 표시)"
             add(summary.toLabel(hideIcons = true)).left().growX().row()
@@ -222,9 +243,11 @@ class WorldMarketTradeSection(
                     .left().growX().row()
             val mapWidth = (parentTab.overviewScreen.stage.width - 65f).coerceIn(320f, 1100f)
             val mapHeight = (mapWidth * 0.54f).coerceIn(220f, 520f)
-            add(WorldMarketRouteMapActor(game, viewer, spectator, visible, tradeMapLowPower))
+            add(WorldMarketRouteMapActor(game, viewer, spectator, visible, tradeMapLowPower, mainRoutes))
                 .width(mapWidth).height(mapHeight).left().row()
-            add("육로: 노랑 · 항로: 하늘색 · 복합: 분홍 · 선 굵기: 거래 횟수".toLabel(hideIcons = true))
+            add("육로: 노랑 · 항로: 하늘색 · 복합: 분홍 · 세계 주무역로: 굵은 연두색".toLabel(hideIcons = true))
+                .left().growX().row()
+            add("주무역로는 공유 구간의 임시 관측 결과이며, 상선 이동·금·자원에는 영향이 없습니다.".toLabel(hideIcons = true))
                 .left().growX().row()
             add("탐험한 지도 칸만 표시하며, 과거 저장파일은 최근 거래 100건부터 복원됩니다.".toLabel(hideIcons = true))
                 .left().growX().row()

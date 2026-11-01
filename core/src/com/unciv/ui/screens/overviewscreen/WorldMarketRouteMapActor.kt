@@ -9,6 +9,7 @@ import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.HexMath
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.market.MarketRouteStat
+import com.unciv.logic.market.WorldMarketMainRoutes.MainTradeCorridor
 import com.unciv.ui.images.ImageGetter
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -24,7 +25,8 @@ class WorldMarketRouteMapActor(
     viewer: Civilization,
     spectator: Boolean,
     routes: List<MarketRouteStat>,
-    private val lowPower: Boolean = true
+    private val lowPower: Boolean = true,
+    mainRoutes: List<MainTradeCorridor> = emptyList(), // GS_WORLD_MAIN_ROUTES_V1
 ) : Actor() {
     private data class Dot(val worldX: Float, val worldY: Float, val water: Boolean)
     private data class Segment(val fromX: Float, val fromY: Float, val toX: Float, val toY: Float)
@@ -33,6 +35,7 @@ class WorldMarketRouteMapActor(
 
     private val dots = ArrayList<Dot>()
     private val lines = ArrayList<PaintedRoute>()
+    private val mainSegments = ArrayList<Segment>()
     private var minX = Float.POSITIVE_INFINITY
     private var maxX = Float.NEGATIVE_INFINITY
     private var minY = Float.POSITIVE_INFINITY
@@ -43,6 +46,7 @@ class WorldMarketRouteMapActor(
     private val landPath = Color(1f, 0.75f, 0.30f, 1f)
     private val seaPath = Color(0.29f, 0.78f, 1f, 1f)
     private val mixedPath = Color(0.98f, 0.51f, 0.82f, 1f)
+    private val mainPath = Color(0.48f, 1f, 0.55f, 1f)
 
     init {
         val world = game.tileMap
@@ -101,6 +105,22 @@ class WorldMarketRouteMapActor(
             }
         }
         lines.addAll(edges.values)
+        // GS_WORLD_MAIN_ROUTES_V1: build highlighted segments once, never in draw().
+        // Fog-of-war and world-wrap protections are identical to ordinary routes.
+        for (corridor in mainRoutes) {
+            for (i in 0 until corridor.tiles.size - 1) {
+                val a = corridor.tiles[i]
+                val b = corridor.tiles[i + 1]
+                val tileA = world.getOrNull(a.x, a.y)
+                val tileB = world.getOrNull(b.x, b.y)
+                if (tileA == null || tileB == null) continue
+                if (!spectator && (!tileA.isExplored(viewer) || !tileB.isExplored(viewer))) continue
+                val p = HexMath.hex2WorldCoords(a)
+                val q = HexMath.hex2WorldCoords(b)
+                if (hypot((p.x - q.x).toDouble(), (p.y - q.y).toDouble()) > 3.0) continue
+                mainSegments.add(Segment(p.x, p.y, q.x, q.y))
+            }
+        }
     }
 
     override fun draw(batch: Batch, parentAlpha: Float) {
@@ -144,6 +164,20 @@ class WorldMarketRouteMapActor(
                 batch.draw(pixel, x1, y1 - thickness / 2f,
                     0f, thickness / 2f, length, thickness, 1f, 1f, angle)
             }
+        }
+        // World main trade corridors are highlighted over the normal trade lanes.
+        batch.color = mainPath
+        val mainThickness = 5.2f
+        for (segment in mainSegments) {
+            val x1 = px(segment.fromX)
+            val y1 = py(segment.fromY)
+            val dx = px(segment.toX) - x1
+            val dy = py(segment.toY) - y1
+            val length = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+            if (length <= 0.001f) continue
+            val angle = atan2(dy, dx) * MathUtils.radiansToDegrees
+            batch.draw(pixel, x1, y1 - mainThickness / 2f,
+                0f, mainThickness / 2f, length, mainThickness, 1f, 1f, angle)
         }
         batch.color = old
     }
