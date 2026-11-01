@@ -26,7 +26,8 @@ object WorldMarketRoutePlanner {
         val originCityName: String,
         val destinationCityName: String,
         val tiles: List<HexCoord>,
-        val estimatedTransportCost: Int = -1 // GS_ECONOMIC_TRADE_ROUTES_V1
+        val estimatedTransportCost: Int = -1, // GS_ECONOMIC_TRADE_ROUTES_V1
+        val originKind: String = "UNKNOWN" // GS_PRODUCTION_CITY_CAPITAL_V1
     )
 
     // A trade route is recalculated on a different turn. This avoids indefinitely
@@ -36,29 +37,43 @@ object WorldMarketRoutePlanner {
     private const val MaxCacheSize = 128
     private const val MaxVisitedTiles = 10000
 
-    fun plan(seller: Civilization, buyer: Civilization): Route {
+    // GS_PRODUCTION_CITY_CAPITAL_V1: resource-specific route, observational only.
+    fun plan(seller: Civilization, buyer: Civilization, resourceName: String = ""): Route {
         val game = seller.gameInfo
-        val key = "${game.gameId}|${game.turns}|${seller.civID}|${buyer.civID}"
+        val key = "${game.gameId}|${game.turns}|${seller.civID}|${buyer.civID}|$resourceName"
         synchronized(cache) {
             cache[key]?.let { return it }
-            val result = calculate(seller, buyer)
+            val result = calculate(seller, buyer, resourceName)
             if (cache.size >= MaxCacheSize) cache.remove(cache.keys.first())
             cache[key] = result
             return result
         }
     }
 
-    private fun calculate(seller: Civilization, buyer: Civilization): Route {
-        // Using the actual tile as key prevents misleading straight-line pairing.
+    private fun calculate(seller: Civilization, buyer: Civilization, resourceName: String): Route {
+        // GS_PRODUCTION_CITY_CAPITAL_V1: Choose CURRENT net-producing cities as origins.
+        // The national resource pool does not track which specific unit of stockpiled
+        // cargo was produced where. In that case, use the seller's capital as a
+        // clearly labelled fallback; never fabricate an origin from a random city.
+        // No resource balances or trade settlement code is changed.
+        val producingCities = if (resourceName.isBlank()) emptyList<City>() else
+            seller.cities.filter { it.getResourcesGeneratedByCity().sumBy(resourceName) > 0 }
+        val originKind = if (producingCities.isNotEmpty()) "PRODUCTION" else "CAPITAL_FALLBACK"
+        val sourceCities = if (producingCities.isNotEmpty()) producingCities
+            else seller.getCapital()?.let { listOf(it) }.orEmpty()
+
         val startCities = LinkedHashMap<Tile, City>()
         val endCities = LinkedHashMap<Tile, City>()
-        for (city in seller.cities) {
+        for (city in sourceCities) {
             val tile = city.getCenterTile()
             if (tile.isLand && !tile.isImpassible()) startCities[tile] = city
         }
-        for (city in buyer.cities) {
-            val tile = city.getCenterTile()
-            if (tile.isLand && !tile.isImpassible()) endCities[tile] = city
+        // Only the BUYER'S CAPITAL is the destination, including landlocked capitals.
+        // The existing city-harbor rule handles coastal loading and inland legs.
+        val buyerCapital = buyer.getCapital()
+        if (buyerCapital != null) {
+            val tile = buyerCapital.getCenterTile()
+            if (tile.isLand && !tile.isImpassible()) endCities[tile] = buyerCapital
         }
 
         if (startCities.isEmpty() || endCities.isEmpty()) return unresolved(seller, buyer)
@@ -80,7 +95,7 @@ object WorldMarketRoutePlanner {
             return Route(mode,
                 startCities[path.first()]?.name.orEmpty(),
                 endCities[path.last()]?.name.orEmpty(),
-                path.map { it.position }, cheapest.estimatedCost)
+                path.map { it.position }, cheapest.estimatedCost, originKind)
         }
         // Fail-safe: if the new weighted search hits its work limit or finds no
         // route, the old BFS still works (with an unknown transport index).
@@ -115,7 +130,7 @@ object WorldMarketRoutePlanner {
                     mode,
                     startCities[path.first()]?.name.orEmpty(),
                     endCities[path.last()]?.name.orEmpty(),
-                    path.map { it.position }
+                    path.map { it.position }, -1, originKind
                 )
             }
             if (predecessor.size >= MaxVisitedTiles) break

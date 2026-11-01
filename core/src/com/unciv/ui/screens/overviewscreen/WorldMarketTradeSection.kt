@@ -278,6 +278,11 @@ class WorldMarketTradeSection(
                         "${it.originCityName.tr()} → ${it.destinationCityName.tr()} · " else ""
                     val steps = if (it.routeTiles.size >= 2) " · ${it.routeTiles.size - 1}칸" else ""
                     add("무역로: $endpoints$routeLabel$steps".toLabel(hideIcons = true)).left().row()
+                    // GS_PRODUCTION_CITY_CAPITAL_V1: Explain origin selection, not physical delivery.
+                    when (it.originKind) {
+                        "PRODUCTION" -> add("출발: 현재 생산 도시(추정) · 도착: 구매국 수도".toLabel(hideIcons = true)).left().row()
+                        "CAPITAL_FALLBACK" -> add("출발: 판매국 수도(생산지 미확인) · 도착: 구매국 수도".toLabel(hideIcons = true)).left().row()
+                    }
                     // GS_ECONOMIC_TRADE_ROUTES_V1: index, not actual charged gold.
                     if (it.estimatedTransportCost >= 0)
                         add("추정 운송지수: ${it.estimatedTransportCost} (최단거리 아닌 최소 운송비)".toLabel(hideIcons = true)).left().row()

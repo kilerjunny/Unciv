@@ -12,12 +12,13 @@ object WorldMarketHistory {
         // If the planner cannot recognize the path, keep the transaction record intact.
         val item = MarketTradeRecord(seller.gameInfo.turns, seller.civID, buyer.civID, resource, qty, gold)
         try {
-            val route = WorldMarketRoutePlanner.plan(seller, buyer)
+            val route = WorldMarketRoutePlanner.plan(seller, buyer, resource) // GS_PRODUCTION_CITY_CAPITAL_V1
             item.routeMode = route.mode
             item.originCityName = route.originCityName
             item.destinationCityName = route.destinationCityName
             item.routeTiles = ArrayList(route.tiles)
             item.estimatedTransportCost = route.estimatedTransportCost // GS_ECONOMIC_TRADE_ROUTES_V1
+            item.originKind = route.originKind // GS_PRODUCTION_CITY_CAPITAL_V1
         } catch (_: Exception) {
             item.routeMode = "UNRESOLVED"
         }
