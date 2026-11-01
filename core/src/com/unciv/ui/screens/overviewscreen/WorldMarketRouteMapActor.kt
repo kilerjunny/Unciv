@@ -9,6 +9,7 @@ import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.HexMath
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.market.MarketRouteStat
+import com.unciv.logic.market.WorldMarketVirtualCarriers
 import com.unciv.logic.market.WorldMarketMainRoutes.MainTradeCorridor
 import com.unciv.ui.images.ImageGetter
 import kotlin.math.atan2
@@ -27,6 +28,7 @@ class WorldMarketRouteMapActor(
     routes: List<MarketRouteStat>,
     private val lowPower: Boolean = true,
     mainRoutes: List<MainTradeCorridor> = emptyList(), // GS_WORLD_MAIN_ROUTES_V1
+    private val carrierView: Boolean = false, // GS_VIRTUAL_MERCHANT_NETWORK_V1
 ) : Actor() {
     private data class Dot(val worldX: Float, val worldY: Float, val water: Boolean)
     private data class Segment(val fromX: Float, val fromY: Float, val toX: Float, val toY: Float)
@@ -47,6 +49,7 @@ class WorldMarketRouteMapActor(
     private val seaPath = Color(0.29f, 0.78f, 1f, 1f)
     private val mixedPath = Color(0.98f, 0.51f, 0.82f, 1f)
     private val mainPath = Color(0.48f, 1f, 0.55f, 1f)
+    private val coastalCarrier = Color(0.72f, 0.88f, 1f, 1f)
 
     init {
         val world = game.tileMap
@@ -90,13 +93,15 @@ class WorldMarketRouteMapActor(
                 val q = HexMath.hex2WorldCoords(b)
                 // Avoid fake lines across the horizontal world wrap.
                 if (hypot((p.x - q.x).toDouble(), (p.y - q.y).toDouble()) > 3.0) continue
+                // GS_VIRTUAL_MERCHANT_NETWORK_V1: color by tile water class.
+                val type = if (carrierView) WorldMarketVirtualCarriers.mode(tileA, tileB) else route.routeMode
                 val ordered = a.x < b.x || (a.x == b.x && a.y <= b.y)
-                val key = if (ordered) EdgeKey(route.routeMode, a, b)
-                    else EdgeKey(route.routeMode, b, a)
+                val key = if (ordered) EdgeKey(type, a, b)
+                    else EdgeKey(type, b, a)
                 val existing = edges[key]
                 if (existing == null) {
                     edges[key] = PaintedRoute(
-                        route.routeMode, route.tradeCount.coerceAtLeast(1),
+                        type, route.tradeCount.coerceAtLeast(1),
                         listOf(Segment(p.x, p.y, q.x, q.y))
                     )
                 } else {
@@ -148,8 +153,9 @@ class WorldMarketRouteMapActor(
         }
         for (route in lines) {
             batch.color = when (route.type) {
-                "LAND" -> landPath
-                "SEA" -> seaPath
+                "LAND", WorldMarketVirtualCarriers.LAND -> landPath
+                "SEA", WorldMarketVirtualCarriers.OCEAN -> seaPath
+                WorldMarketVirtualCarriers.COAST -> coastalCarrier
                 else -> mixedPath
             }
             val thickness = min(5f, 1.5f + route.count * 0.28f)

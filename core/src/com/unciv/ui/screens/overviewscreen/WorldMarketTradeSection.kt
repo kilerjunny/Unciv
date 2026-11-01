@@ -14,6 +14,7 @@ import com.unciv.logic.market.WorldMarketOrderPurchase
 import com.unciv.logic.market.WorldMarketHistory
 import com.unciv.logic.market.WorldMarketRouteStats
 import com.unciv.logic.market.WorldMarketMainRoutes
+import com.unciv.logic.market.WorldMarketVirtualCarriers
 import com.unciv.models.ruleset.tile.ResourceType
 import com.unciv.models.translations.tr
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
@@ -39,6 +40,7 @@ class WorldMarketTradeSection(
     private var tradeMapMode = "ALL"
     private var tradeMapLowPower = true // GS_TRADE_MAP_COOL_V1: default low heat on mobile
     private var tradeMapMainOnly = false // GS_WORLD_MAIN_ROUTES_V1
+    private var tradeMapCarrierView = false // GS_VIRTUAL_MERCHANT_NETWORK_V1
     private var message = ""
     // GS_WORLD_MARKET_V14_SEARCH
     private var resourceSearch = ""
@@ -209,10 +211,22 @@ class WorldMarketTradeSection(
             )
             mainOnlyButton.onClick {
                 tradeMapMainOnly = !tradeMapMainOnly
+                if (tradeMapMainOnly) tradeMapCarrierView = false
                 render()
                 parentTab.overviewScreen.resizePage(parentTab)
             }
             add(mainOnlyButton).left().row()
+            // GS_VIRTUAL_MERCHANT_NETWORK_V1: display only; no new routes or units.
+            val carrierButton = TextButton(
+                if (tradeMapCarrierView) "가상 상선망 ✓" else "가상 상선망 보기", BaseScreen.skin
+            )
+            carrierButton.onClick {
+                tradeMapCarrierView = !tradeMapCarrierView
+                if (tradeMapCarrierView) tradeMapMainOnly = false
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            add(carrierButton).left().row()
 
             val knownIds = viewer.getKnownCivs().map { it.civID }.toSet() + viewer.civID
             val entries = (if (tradeMapLifetime) WorldMarketRouteStats.lifetimeRows(game)
@@ -243,9 +257,12 @@ class WorldMarketTradeSection(
                     .left().growX().row()
             val mapWidth = (parentTab.overviewScreen.stage.width - 65f).coerceIn(320f, 1100f)
             val mapHeight = (mapWidth * 0.54f).coerceIn(220f, 520f)
-            add(WorldMarketRouteMapActor(game, viewer, spectator, visible, tradeMapLowPower, mainRoutes))
+            add(WorldMarketRouteMapActor(game, viewer, spectator, visible, tradeMapLowPower, mainRoutes, tradeMapCarrierView))
                 .width(mapWidth).height(mapHeight).left().row()
-            add("육로: 노랑 · 항로: 하늘색 · 복합: 분홍 · 세계 주무역로: 굵은 연두색".toLabel(hideIcons = true))
+            val routeLegend = if (tradeMapCarrierView)
+                "육상 상단: 노랑 · 연안 상선: 연한 파랑 · 원양 상선: 하늘색 · 환적: 분홍 · 주무역로: 연두색"
+            else "육로: 노랑 · 항로: 하늘색 · 복합: 분홍 · 세계 주무역로: 굵은 연두색"
+            add(routeLegend.toLabel(hideIcons = true))
                 .left().growX().row()
             add("세계 무역로는 최소 운송지수 경로로 기록됩니다. 운송지수는 실제 금 차감이 아닙니다.".toLabel(hideIcons = true))
                 .left().growX().row()
@@ -257,6 +274,10 @@ class WorldMarketTradeSection(
         if (historyOpen) {
             val game = playerView.getCiv().gameInfo
             val records = WorldMarketHistory.recent(game)
+            // GS_VIRTUAL_MERCHANT_NETWORK_V1: calculate once on tab opening.
+            val backbone = WorldMarketVirtualCarriers.mainEdges(
+                WorldMarketMainRoutes.select(game, WorldMarketRouteStats.windowRows(game))
+            )
             add("최근 세계 시장 거래 ${records.size}건 (최대 100건)".toLabel()).left().row()
             if (records.isEmpty())
                 add("체결된 거래가 없습니다.".toLabel()).left().row()
@@ -286,6 +307,12 @@ class WorldMarketTradeSection(
                     // GS_ECONOMIC_TRADE_ROUTES_V1: index, not actual charged gold.
                     if (it.estimatedTransportCost >= 0)
                         add("추정 운송지수: ${it.estimatedTransportCost} (최단거리 아닌 최소 운송비)".toLabel(hideIcons = true)).left().row()
+                    // GS_VIRTUAL_MERCHANT_NETWORK_V1: classification of recorded legs.
+                    if (it.routeTiles.size >= 2) {
+                        val legs = WorldMarketVirtualCarriers.summarize(game, it.routeTiles, backbone)
+                        add("가상 운송 구간: 원양 ${legs.ocean} · 연안 ${legs.coast} · 육상 ${legs.land} · 환적 ${legs.transfers}".toLabel(hideIcons = true)).left().row()
+                        add("현재 세계 주무역로 ${legs.main}칸 · 지선 ${legs.branches}칸".toLabel(hideIcons = true)).left().row()
+                    }
                 }
             }
             return
