@@ -247,7 +247,7 @@ class WorldMarketTradeSection(
                 .width(mapWidth).height(mapHeight).left().row()
             add("육로: 노랑 · 항로: 하늘색 · 복합: 분홍 · 세계 주무역로: 굵은 연두색".toLabel(hideIcons = true))
                 .left().growX().row()
-            add("주무역로는 공유 구간의 임시 관측 결과이며, 상선 이동·금·자원에는 영향이 없습니다.".toLabel(hideIcons = true))
+            add("세계 무역로는 최소 운송지수 경로로 기록됩니다. 운송지수는 실제 금 차감이 아닙니다.".toLabel(hideIcons = true))
                 .left().growX().row()
             add("탐험한 지도 칸만 표시하며, 과거 저장파일은 최근 거래 100건부터 복원됩니다.".toLabel(hideIcons = true))
                 .left().growX().row()
@@ -278,6 +278,9 @@ class WorldMarketTradeSection(
                         "${it.originCityName.tr()} → ${it.destinationCityName.tr()} · " else ""
                     val steps = if (it.routeTiles.size >= 2) " · ${it.routeTiles.size - 1}칸" else ""
                     add("무역로: $endpoints$routeLabel$steps".toLabel(hideIcons = true)).left().row()
+                    // GS_ECONOMIC_TRADE_ROUTES_V1: index, not actual charged gold.
+                    if (it.estimatedTransportCost >= 0)
+                        add("추정 운송지수: ${it.estimatedTransportCost} (최단거리 아닌 최소 운송비)".toLabel(hideIcons = true)).left().row()
                 }
             }
             return

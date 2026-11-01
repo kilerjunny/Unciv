@@ -138,6 +138,9 @@ object GrandStrategyPerf {
             val count = result.counts[key] ?: 0
             lines.add("$label: ${ms(ns)} ms (${count}회)")
         }
+        // GS_ECONOMIC_TRADE_ROUTES_V1: nested in market activity; do not add to totals.
+        lines.add("경제 경로 탐색: ${ms(result.durations["market_economic_route"] ?: 0L)} ms " +
+            "(${result.counts["market_economic_route"] ?: 0}회, 시장 처리와 중복)")
 
         // Top-level categories only. Subtimers intentionally overlap their parents.
         val direct = groups.sumOf { (_, key) -> result.durations[key] ?: 0L }

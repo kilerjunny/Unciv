@@ -17,6 +17,7 @@ object WorldMarketHistory {
             item.originCityName = route.originCityName
             item.destinationCityName = route.destinationCityName
             item.routeTiles = ArrayList(route.tiles)
+            item.estimatedTransportCost = route.estimatedTransportCost // GS_ECONOMIC_TRADE_ROUTES_V1
         } catch (_: Exception) {
             item.routeMode = "UNRESOLVED"
         }

@@ -8,7 +8,8 @@ data class MarketTradeRecord(
     var routeMode: String = "UNKNOWN",
     var originCityName: String = "",
     var destinationCityName: String = "",
-    var routeTiles: ArrayList<com.unciv.logic.map.HexCoord> = ArrayList()
+    var routeTiles: ArrayList<com.unciv.logic.map.HexCoord> = ArrayList(),
+    var estimatedTransportCost: Int = -1 // GS_ECONOMIC_TRADE_ROUTES_V1: optional for older saves
 ) : IsPartOfGameInfoSerialization {
     constructor() : this(0, "", "", "", 0, 0)
 }

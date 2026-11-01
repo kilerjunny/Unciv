@@ -1,6 +1,7 @@
 package com.unciv.logic.market
 
 import com.unciv.logic.city.City
+import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.tile.Tile
@@ -24,7 +25,8 @@ object WorldMarketRoutePlanner {
         val mode: String,
         val originCityName: String,
         val destinationCityName: String,
-        val tiles: List<HexCoord>
+        val tiles: List<HexCoord>,
+        val estimatedTransportCost: Int = -1 // GS_ECONOMIC_TRADE_ROUTES_V1
     )
 
     // A trade route is recalculated on a different turn. This avoids indefinitely
@@ -60,6 +62,28 @@ object WorldMarketRoutePlanner {
         }
 
         if (startCities.isEmpty() || endCities.isEmpty()) return unresolved(seller, buyer)
+
+        // GS_ECONOMIC_TRADE_ROUTES_V1: minimum transport index, not minimum tile count.
+        // Trade settlement has already happened. This records the observed route only.
+        val cheapest = GrandStrategyPerf.measure("market_economic_route") {
+            WorldMarketEconomicRoutePlanner.find(seller.gameInfo, startCities.keys, endCities.keys)
+        }
+        if (cheapest != null) {
+            val path = cheapest.tiles
+            val water = path.any { it.isWater }
+            val inlandLeg = path.drop(1).dropLast(1).any { it.isLand }
+            val mode = when {
+                !water -> "LAND"
+                inlandLeg -> "MIXED"
+                else -> "SEA"
+            }
+            return Route(mode,
+                startCities[path.first()]?.name.orEmpty(),
+                endCities[path.last()]?.name.orEmpty(),
+                path.map { it.position }, cheapest.estimatedCost)
+        }
+        // Fail-safe: if the new weighted search hits its work limit or finds no
+        // route, the old BFS still works (with an unknown transport index).
         val targetTiles = endCities.keys
         val queue = ArrayDeque<Tile>()
         val predecessor = HashMap<Tile, Tile?>()
