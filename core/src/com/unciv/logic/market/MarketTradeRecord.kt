@@ -10,7 +10,13 @@ data class MarketTradeRecord(
     var destinationCityName: String = "",
     var routeTiles: ArrayList<com.unciv.logic.map.HexCoord> = ArrayList(),
     var estimatedTransportCost: Int = -1, // GS_ECONOMIC_TRADE_ROUTES_V1: optional for older saves
-    var originKind: String = "UNKNOWN" // GS_PRODUCTION_CITY_CAPITAL_V1: old saves stay UNKNOWN
+    var originKind: String = "UNKNOWN", // GS_PRODUCTION_CITY_CAPITAL_V1
+    // GS_TERRITORY_TOLLS_SUPPLY_V1: -1 means absent in old saves.
+    var terrainCost: Int = -1,
+    var mainSaving: Int = -1,
+    var supplyCost: Int = -1,
+    var tollCost: Int = -1,
+    var portCost: Int = -1
 ) : IsPartOfGameInfoSerialization {
     constructor() : this(0, "", "", "", 0, 0)
 }

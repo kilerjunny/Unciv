@@ -27,7 +27,12 @@ object WorldMarketRoutePlanner {
         val destinationCityName: String,
         val tiles: List<HexCoord>,
         val estimatedTransportCost: Int = -1, // GS_ECONOMIC_TRADE_ROUTES_V1
-        val originKind: String = "UNKNOWN" // GS_PRODUCTION_CITY_CAPITAL_V1
+        val originKind: String = "UNKNOWN", // GS_PRODUCTION_CITY_CAPITAL_V1
+        val terrainCost: Int = -1, // GS_TERRITORY_TOLLS_SUPPLY_V1
+        val mainSaving: Int = -1,
+        val supplyCost: Int = -1,
+        val tollCost: Int = -1,
+        val portCost: Int = -1
     )
 
     // A trade route is recalculated on a different turn. This avoids indefinitely
@@ -81,7 +86,7 @@ object WorldMarketRoutePlanner {
         // GS_ECONOMIC_TRADE_ROUTES_V1: minimum transport index, not minimum tile count.
         // Trade settlement has already happened. This records the observed route only.
         val cheapest = GrandStrategyPerf.measure("market_economic_route") {
-            WorldMarketEconomicRoutePlanner.find(seller.gameInfo, startCities.keys, endCities.keys)
+            WorldMarketEconomicRoutePlanner.find(seller, buyer, startCities.keys, endCities.keys)
         }
         if (cheapest != null) {
             val path = cheapest.tiles
@@ -95,7 +100,9 @@ object WorldMarketRoutePlanner {
             return Route(mode,
                 startCities[path.first()]?.name.orEmpty(),
                 endCities[path.last()]?.name.orEmpty(),
-                path.map { it.position }, cheapest.estimatedCost, originKind)
+                path.map { it.position }, cheapest.estimatedCost, originKind,
+                cheapest.terrainCost, cheapest.mainSaving, cheapest.supplyCost,
+                cheapest.tollCost, cheapest.portCost)
         }
         // Fail-safe: if the new weighted search hits its work limit or finds no
         // route, the old BFS still works (with an unknown transport index).

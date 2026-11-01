@@ -1,6 +1,7 @@
 package com.unciv.logic.market
 
 import com.unciv.logic.GameInfo
+import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.HexCoord
 import com.unciv.logic.map.tile.Tile
 import java.lang.ref.WeakReference
@@ -17,7 +18,12 @@ import java.util.PriorityQueue
  * cause a different backbone in the middle of a turn.
  */
 object WorldMarketEconomicRoutePlanner {
-    data class Result(val tiles: List<Tile>, val estimatedCost: Int)
+    // GS_TERRITORY_TOLLS_SUPPLY_V1: per-trade index cost breakdown.
+    data class Result(
+        val tiles: List<Tile>, val estimatedCost: Int,
+        val terrainCost: Int, val mainSaving: Int,
+        val supplyCost: Int, val tollCost: Int, val portCost: Int
+    )
 
     private data class Edge(val a: HexCoord, val b: HexCoord)
     // GS_CONNECTED_TRADE_BACKBONE_V2: prefer a main line on equal-cost routes.
@@ -25,10 +31,8 @@ object WorldMarketEconomicRoutePlanner {
     private data class Score(val cost: Int, val mainSteps: Int)
 
     // These are provisional balance values, NOT gold/turn or charged transport fees.
-    private const val InlandStep = 12
-    private const val CoastalStep = 7
-    private const val OpenOceanStep = 4
-    private const val PortTransfer = 16
+    // Terrain, main-route discount, supply, border toll and harbor costs
+    // are now calculated together by WorldMarketTerritoryCosts.
     private const val MaxSettledTiles = 10000
 
     // Only the most recent game/turn is retained. WeakReference avoids retaining a
@@ -53,7 +57,9 @@ object WorldMarketEconomicRoutePlanner {
     }
 
     /** Multi-source (any seller city) -> multi-target (any buyer city). */
-    fun find(game: GameInfo, origins: Collection<Tile>, destinations: Set<Tile>): Result? {
+    fun find(seller: Civilization, buyer: Civilization,
+             origins: Collection<Tile>, destinations: Set<Tile>): Result? {
+        val game = seller.gameInfo
         if (origins.isEmpty() || destinations.isEmpty()) return null
         val main = mainEdges(game)
         val best = HashMap<Tile, Score>()
@@ -82,7 +88,11 @@ object WorldMarketEconomicRoutePlanner {
                     at = parent[at]
                 }
                 reversed.reverse()
-                return Result(reversed, current.cost)
+                val detail = WorldMarketTerritoryCosts.breakdown(reversed, seller, buyer) { a, b ->
+                    edge(a.position, b.position) in main
+                }
+                return Result(reversed, current.cost, detail.terrain, detail.mainSaving,
+                    detail.supply, detail.toll, detail.port)
             }
             for (next in current.tile.neighbors) {
                 if (!passable(next)) continue
@@ -92,7 +102,9 @@ object WorldMarketEconomicRoutePlanner {
                     val harbor = if (current.tile.isLand) current.tile else next
                     if (!harbor.isCityCenter()) continue
                 }
-                val nextCost = current.cost + stepCost(current.tile, next, main)
+                val isMain = edge(current.tile.position, next.position) in main
+                val nextCost = current.cost + WorldMarketTerritoryCosts.stepCost(
+                    current.tile, next, seller, buyer, isMain)
                 val nextMain = current.mainSteps +
                     (if (edge(current.tile.position, next.position) in main) 1 else 0)
                 val previous = best[next]
@@ -111,23 +123,6 @@ object WorldMarketEconomicRoutePlanner {
 
     private fun passable(tile: Tile) =
         !tile.isImpassible() && (tile.isLand || tile.isWater)
-
-    private fun stepCost(from: Tile, to: Tile, main: Set<Edge>): Int {
-        // A segment's cost must be symmetric for trade in either direction.
-        val base = (terrainCost(from) + terrainCost(to) + 1) / 2
-        // Established shared trunk lanes are cheaper due to consolidation.
-        // A 25% discount is intentionally modest: longer detours can be worth
-        // taking, but an extremely circuitous backbone should not dominate.
-        val laneCost = if (edge(from.position, to.position) in main)
-            ((base * 3 + 3) / 4).coerceAtLeast(1) else base
-        return laneCost + if (from.isLand != to.isLand) PortTransfer else 0
-    }
-
-    private fun terrainCost(tile: Tile) = when {
-        tile.isLand -> InlandStep
-        tile.isOcean -> OpenOceanStep
-        else -> CoastalStep
-    }
 
     private fun edge(a: HexCoord, b: HexCoord): Edge =
         if (a.x < b.x || (a.x == b.x && a.y <= b.y)) Edge(a, b) else Edge(b, a)

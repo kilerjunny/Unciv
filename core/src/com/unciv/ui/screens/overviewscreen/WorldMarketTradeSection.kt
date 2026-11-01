@@ -309,7 +309,12 @@ class WorldMarketTradeSection(
                     }
                     // GS_ECONOMIC_TRADE_ROUTES_V1: index, not actual charged gold.
                     if (it.estimatedTransportCost >= 0)
-                        add("추정 운송지수: ${it.estimatedTransportCost} (최단거리 아닌 최소 운송비)".toLabel(hideIcons = true)).left().row()
+                        add("추정 운송지수: ${it.estimatedTransportCost} (실제 금 차감 없음)".toLabel(hideIcons = true)).left().row()
+                    // GS_TERRITORY_TOLLS_SUPPLY_V1: route choice only, no gold transfers.
+                    if (it.supplyCost >= 0 && it.tollCost >= 0) {
+                        add("보급료 ${it.supplyCost} · 통행료 ${it.tollCost} · 항구/환적 ${it.portCost} (운송지수)".toLabel(hideIcons = true)).left().row()
+                        add("기본 ${it.terrainCost} - 주무역로 절감 ${it.mainSaving} + 위 비용 = 총 ${it.estimatedTransportCost}".toLabel(hideIcons = true)).left().row()
+                    }
                     // GS_VIRTUAL_MERCHANT_NETWORK_V1: classification of recorded legs.
                     if (it.routeTiles.size >= 2) {
                         val legs = WorldMarketVirtualCarriers.summarize(game, it.routeTiles, backbone)

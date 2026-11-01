@@ -19,6 +19,12 @@ object WorldMarketHistory {
             item.routeTiles = ArrayList(route.tiles)
             item.estimatedTransportCost = route.estimatedTransportCost // GS_ECONOMIC_TRADE_ROUTES_V1
             item.originKind = route.originKind // GS_PRODUCTION_CITY_CAPITAL_V1
+            // GS_TERRITORY_TOLLS_SUPPLY_V1: index-only estimated costs.
+            item.terrainCost = route.terrainCost
+            item.mainSaving = route.mainSaving
+            item.supplyCost = route.supplyCost
+            item.tollCost = route.tollCost
+            item.portCost = route.portCost
         } catch (_: Exception) {
             item.routeMode = "UNRESOLVED"
         }
