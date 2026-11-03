@@ -16,7 +16,11 @@ data class MarketTradeRecord(
     var mainSaving: Int = -1,
     var supplyCost: Int = -1,
     var tollCost: Int = -1,
-    var portCost: Int = -1
+    var portCost: Int = -1,
+    // GS_WORLD_MARKET_CASH_TOLLS_V1: defaults keep old saves untaxed.
+    var cashTollGold: Int = 0,
+    var cashTollSettled: Boolean = false,
+    var cashTollPayments: ArrayList<MarketTollPayment> = ArrayList()
 ) : IsPartOfGameInfoSerialization {
     constructor() : this(0, "", "", "", 0, 0)
 }

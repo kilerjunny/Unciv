@@ -282,6 +282,13 @@ class WorldMarketTradeSection(
                 WorldMarketMainRoutes.select(game, WorldMarketRouteStats.windowRows(game))
             )
             add("최근 세계 시장 거래 ${records.size}건 (최대 100건)".toLabel()).left().row()
+            // GS_WORLD_MARKET_CASH_TOLLS_V1: this is a recent-record subtotal, not lifetime income.
+            val myCivId = playerView.getCiv().civID
+            val myTollIncome = records.sumOf { record ->
+                record.cashTollPayments.filter { it.civId == myCivId }.sumOf { it.gold }
+            }
+            val myTollPaid = records.filter { it.sellerCivId == myCivId }.sumOf { it.cashTollGold }
+            add("최근 거래 기록 기준 내 통행료 수입 ${myTollIncome}G · 지출 ${myTollPaid}G".toLabel(hideIcons = true)).left().row()
             if (records.isEmpty())
                 add("체결된 거래가 없습니다.".toLabel()).left().row()
 
@@ -309,11 +316,22 @@ class WorldMarketTradeSection(
                     }
                     // GS_ECONOMIC_TRADE_ROUTES_V1: index, not actual charged gold.
                     if (it.estimatedTransportCost >= 0)
-                        add("추정 운송지수: ${it.estimatedTransportCost} (실제 금 차감 없음)".toLabel(hideIcons = true)).left().row()
+                        add("추정 운송지수: ${it.estimatedTransportCost} (운송지수는 골드가 아님)".toLabel(hideIcons = true)).left().row()
                     // GS_TERRITORY_TOLLS_SUPPLY_V1: route choice only, no gold transfers.
                     if (it.supplyCost >= 0 && it.tollCost >= 0) {
                         add("보급료 ${it.supplyCost} · 통행료 ${it.tollCost} · 항구/환적 ${it.portCost} (운송지수)".toLabel(hideIcons = true)).left().row()
                         add("기본 ${it.terrainCost} - 주무역로 절감 ${it.mainSaving} + 위 비용 = 총 ${it.estimatedTransportCost}".toLabel(hideIcons = true)).left().row()
+                    }
+                    // GS_WORLD_MARKET_CASH_TOLLS_V1: actual gold from the seller's sale proceeds.
+                    if (it.cashTollSettled) {
+                        add("실제 통행료: ${it.cashTollGold}G · 판매국 순수입 ${it.totalGold - it.cashTollGold}G (구매국은 표기가격 지불)".toLabel(hideIcons = true)).left().row()
+                        if (it.cashTollPayments.isNotEmpty()) {
+                            val recipients = it.cashTollPayments.joinToString(" · ") { payout ->
+                                val name = game.getCivilizationOrNull(payout.civId)?.civName?.tr() ?: payout.civId
+                                "$name +${payout.gold}G"
+                            }
+                            add("통행국 국고 수입: $recipients".toLabel(hideIcons = true)).left().row()
+                        }
                     }
                     // GS_VIRTUAL_MERCHANT_NETWORK_V1: classification of recorded legs.
                     if (it.routeTiles.size >= 2) {

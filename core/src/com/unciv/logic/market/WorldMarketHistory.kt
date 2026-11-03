@@ -3,8 +3,8 @@ import com.unciv.logic.GameInfo
 import com.unciv.logic.civilization.Civilization
 
 object WorldMarketHistory {
-    fun record(seller: Civilization, buyer: Civilization, resource: String, qty: Int, gold: Int) {
-        if (seller == buyer || qty <= 0 || gold <= 0) return
+    fun record(seller: Civilization, buyer: Civilization, resource: String, qty: Int, gold: Int): MarketTradeRecord? {
+        if (seller == buyer || qty <= 0 || gold <= 0) return null
         // GS_TRADE_MAP_SPEED_V1: recover any remaining old history once per save.
         WorldMarketRouteStats.initializeIfNeeded(seller.gameInfo)
         val items = seller.gameInfo.worldMarketHistory
@@ -28,9 +28,16 @@ object WorldMarketHistory {
         } catch (_: Exception) {
             item.routeMode = "UNRESOLVED"
         }
+        // GS_WORLD_MARKET_CASH_TOLLS_V1: the underlying TradeLogic transfer is already done.
+        // A fee may only be paid on a newly completed, successfully routed trade.
+        // A route/quote error may NOT undo the original sale or invent revenue.
+        try {
+            WorldMarketCashTolls.settle(seller, buyer, item)
+        } catch (_: Exception) { /* Keep the already-settled trade intact. */ }
         items.add(item)
         WorldMarketRouteStats.record(seller.gameInfo, item)
         if (items.size > 100) items.subList(0, items.size - 100).clear()
+        return item
     }
 
     fun recent(game: GameInfo) =

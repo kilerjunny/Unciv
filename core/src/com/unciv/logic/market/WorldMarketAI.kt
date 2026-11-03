@@ -140,10 +140,12 @@ object WorldMarketAI {
                 game.worldMarketOrders.remove(order)
             }
 
-            WorldMarketHistory.record(seller, buyer, resource.name, 1, order.unitPrice)
+            val settledRecord = WorldMarketHistory.record(seller, buyer, resource.name, 1, order.unitPrice)
+            val receivedGold = order.unitPrice - (settledRecord?.cashTollGold ?: 0)
+            val paidToll = settledRecord?.cashTollGold ?: 0
 
             seller.addNotification(
-                "세계 시장: [${buyer.civName}]이 [${resource.name}] 1개를 구매했습니다. (+${order.unitPrice}G)",
+                "세계 시장: [${buyer.civName}]이 [${resource.name}] 1개를 구매했습니다. (+${receivedGold}G, 통행료 ${paidToll}G)",
                 NotificationCategory.Trade,
                 NotificationIcon.Trade,
                 buyer.civName
