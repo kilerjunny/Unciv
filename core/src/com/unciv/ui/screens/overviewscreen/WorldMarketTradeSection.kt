@@ -331,6 +331,12 @@ class WorldMarketTradeSection(
                                 "$name +${payout.gold}G"
                             }
                             add("통행국 국고 수입: $recipients".toLabel(hideIcons = true)).left().row()
+                            // GS_MARITIME_PASSAGE_TRANSSHIPMENT_V2: real gold, not route indices.
+                            val landCash = it.cashTollPayments.sumOf { p -> p.landGold }
+                            val seaCash = it.cashTollPayments.sumOf { p -> p.seaGold }
+                            val harborCash = it.cashTollPayments.sumOf { p -> p.harborGold }
+                            if (landCash + seaCash + harborCash > 0)
+                                add("실제 요금 구분: 육상 통행 ${landCash}G · 해상 통항 ${seaCash}G · 항구 환적 ${harborCash}G".toLabel(hideIcons = true)).left().row()
                         }
                     }
                     // GS_VIRTUAL_MERCHANT_NETWORK_V1: classification of recorded legs.

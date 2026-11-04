@@ -18,9 +18,12 @@ object WorldMarketCashTolls {
     private const val MaximumPercent = 8
     private const val FriendlyLandGold = 1
     private const val NeutralLandGold = 2
-    private const val ForeignHarborGold = 1
+    // GS_MARITIME_FEES_RATES_V3: standard passage 2G, transshipment 4G.
+    private const val ForeignHarborGold = 4
+    // GS_MARITIME_PASSAGE_TRANSSHIPMENT_V2: once per third-party controller.
+    private const val ForeignSeaPassageGold = 2
 
-    private class Fee(var landGold: Int = 0, var harborGold: Int = 0)
+    private class Fee(var landGold: Int = 0, var seaGold: Int = 0, var harborGold: Int = 0)
 
     /** Pure price cap, separate from the much larger pathfinding cost index. */
     fun capForPrice(gold: Int): Int =
@@ -33,8 +36,28 @@ object WorldMarketCashTolls {
     private fun isFriendly(seller: Civilization, owner: Civilization): Boolean =
         seller.getDiplomacyManager(owner)?.isConsideredFriendlyTerritory() == true
 
-    /** Charge each third country once for land entry, and once for its harbor use.
-     * Crossing merely its coastal water without landing is free.
+    /** Identify only unambiguous coastal jurisdiction. Actual water tile ownership
+     * wins. For an unowned COAST tile, a single neighboring landowner is a
+     * provisional controller; conflicting coastal ownership means FREE passage.
+     * Never treat unowned deep ocean as national territory.
+     */
+    private fun seaController(tile: Tile): Civilization? {
+        if (!tile.isWater) return null
+        val direct = tile.getOwner()
+        if (direct != null) return direct
+        if (tile.isOcean) return null
+        var controller: Civilization? = null
+        for (neighbor in tile.neighbors) {
+            if (!neighbor.isLand) continue
+            val owner = neighbor.getOwner() ?: continue
+            if (controller == null) controller = owner
+            else if (controller != owner) return null
+        }
+        return controller
+    }
+
+    /** Charge once per third country for land entry, coastal sea passage and
+     * eligible harbor transshipment. Crossing international high seas is free.
      * A country at war with either trading partner is NEVER paid; the routing
      * algorithm separately makes hostile territory expensive but does not yet
      * enforce physical blockades or legal passage permissions.
@@ -48,6 +71,7 @@ object WorldMarketCashTolls {
         // to countries encountered first; independent of hash iteration order.
         val requested = LinkedHashMap<Civilization, Fee>()
         val chargedLand = HashSet<String>()
+        val chargedSea = HashSet<String>()
         val chargedPorts = HashSet<String>()
 
         for (i in 1 until tiles.size) {
@@ -63,6 +87,16 @@ object WorldMarketCashTolls {
                         if (isFriendly(seller, owner)) FriendlyLandGold else NeutralLandGold
                 }
             }
+            // Merely passing through a foreign-controlled sea tile is enough;
+            // no landing/port call is needed. Charge each country once per trade.
+            if (to.isWater) {
+                val seaOwner = seaController(to)
+                if (eligible(seaOwner, seller, buyer) && seaOwner != null &&
+                    chargedSea.add(seaOwner.civID)
+                ) {
+                    requested.getOrPut(seaOwner) { Fee() }.seaGold = ForeignSeaPassageGold
+                }
+            }
             if (from.isLand != to.isLand) {
                 val harbor = if (from.isLand) from else to
                 val portOwner = harbor.getOwner()
@@ -74,16 +108,36 @@ object WorldMarketCashTolls {
             }
         }
 
+        // GS_MARITIME_FEES_RATES_V3: allocate scarce capped gold to actual
+        // harbor transshipment first, then land passage, then sea passage.
+        // This makes a requested 4G port fee meaningful on a 50G contract
+        // without violating the existing 8% / 6G cap. Within each category,
+        // countries are ordered by first encounter along the physical route.
         var remaining = cap
-        val result = ArrayList<MarketTollPayment>()
-        for ((recipient, fee) in requested) {
-            if (remaining == 0) break
-            val payout = minOf(remaining, fee.landGold + fee.harborGold)
-            if (payout <= 0) continue
-            result.add(MarketTollPayment(recipient.civID, payout))
-            remaining -= payout
+        val allocated = LinkedHashMap<Civilization, Fee>()
+        for (category in 0..2) {
+            for ((recipient, request) in requested) {
+                if (remaining == 0) break
+                val wanted = when (category) {
+                    0 -> request.harborGold
+                    1 -> request.landGold
+                    else -> request.seaGold
+                }
+                val amount = minOf(remaining, wanted)
+                if (amount <= 0) continue
+                val payout = allocated.getOrPut(recipient) { Fee() }
+                when (category) {
+                    0 -> payout.harborGold += amount
+                    1 -> payout.landGold += amount
+                    else -> payout.seaGold += amount
+                }
+                remaining -= amount
+            }
         }
-        return result
+        return allocated.map { (recipient, fee) ->
+            MarketTollPayment(recipient.civID, fee.landGold + fee.seaGold + fee.harborGold,
+                fee.landGold, fee.seaGold, fee.harborGold)
+        }
     }
 
     /** Idempotent per MarketTradeRecord. Must only be called for a just-settled
