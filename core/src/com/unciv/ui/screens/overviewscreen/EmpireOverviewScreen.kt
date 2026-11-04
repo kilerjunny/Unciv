@@ -29,7 +29,11 @@ class EmpireOverviewScreen(
 
     // Stable tab keys: use the Korean caption for the custom Formations tab.
     private fun tabCaption(category: EmpireOverviewCategories): String =
-        if (category == EmpireOverviewCategories.Formations) "편제" else category.name
+        when (category) {
+            EmpireOverviewCategories.Formations -> "편제"
+            EmpireOverviewCategories.Merchants -> "상단"
+            else -> category.name
+        }
 
     override fun dispose() {
         tabbedPager.selectPage(-1)

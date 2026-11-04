@@ -27,14 +27,15 @@ import com.unciv.view.CivView
 
 class WorldMarketTradeSection(
     private val playerView: CivView,
-    private val parentTab: TradesOverviewTab
+    private val parentTab: EmpireOverviewTab,
+    private val merchantMode: Boolean = false // GS_MERCHANT_OVERVIEW_TAB_V1
 ) : Table(BaseScreen.skin) {
 
     private var expanded = true
     private var historyOpen = false
     private var performanceOpen = false
     private var militaryMarketOpen = false
-    private var tradeMapOpen = false
+    private var tradeMapOpen = merchantMode
     private var tradeMapOnlyMine = false
     private var tradeMapLifetime = false
     private var tradeMapMode = "ALL"
@@ -59,7 +60,7 @@ class WorldMarketTradeSection(
         defaults().pad(5f)
 
         val header = Table(BaseScreen.skin)
-        header.add("세계 시장".toLabel(
+        header.add((if (merchantMode) "상단 · 무역 정보" else "세계 시장").toLabel(
             fontSize = Constants.headingFontSize
         )).left().growX()
 
@@ -74,14 +75,13 @@ class WorldMarketTradeSection(
         }
         header.add(toggle)
 
-        val resourcesButton =
-            TextButton("자원 현황", BaseScreen.skin)
-        resourcesButton.onClick {
-            parentTab.overviewScreen.select(
-                EmpireOverviewCategories.Resources, ""
-            )
+        if (!merchantMode) {
+            val resourcesButton = TextButton("자원 현황", BaseScreen.skin)
+            resourcesButton.onClick {
+                parentTab.overviewScreen.select(EmpireOverviewCategories.Resources, "")
+            }
+            header.add(resourcesButton).padLeft(5f)
         }
-        header.add(resourcesButton).padLeft(5f)
 
         add(header).growX().row()
 
@@ -90,46 +90,70 @@ class WorldMarketTradeSection(
 
         if (!expanded) return
 
-        val tradeMapButton = TextButton(if (tradeMapOpen) "시장 보기" else "무역 지도", BaseScreen.skin)
-        tradeMapButton.onClick {
-            tradeMapOpen = !tradeMapOpen
-            if (tradeMapOpen) { historyOpen = false; performanceOpen = false; militaryMarketOpen = false }
-            render()
-            parentTab.overviewScreen.resizePage(parentTab)
-        }
-        add(tradeMapButton).left().row()
+        // GS_MERCHANT_OVERVIEW_TAB_V1: trade contracts stay in Trades,
+        // while routes, logistics, records and diagnostics live in Merchants.
+        if (merchantMode) {
+            val viewer = playerView.getCiv()
+            val recentRecords = WorldMarketHistory.recent(viewer.gameInfo)
+            val tollEarned = recentRecords.sumOf { record ->
+                record.cashTollPayments.filter { it.civId == viewer.civID }.sumOf { it.gold }
+            }
+            val tollPaid = recentRecords.filter { it.sellerCivId == viewer.civID }
+                .sumOf { it.cashTollGold }
+            val amount = recentRecords.sumOf { it.quantity }
+            add("최근 거래 기록 ${recentRecords.size}건 · 물동량 ${amount}개 · 내 통행료 수입 ${tollEarned}G / 지출 ${tollPaid}G".toLabel(hideIcons = true))
+                .left().growX().row()
+            add("현재 육상 상단·연안/원양 상선은 가상 운송 구간입니다. 독립적인 상단 AI 운항은 아직 미구현입니다.".toLabel(hideIcons = true))
+                .left().growX().row()
 
-        val historyButton = TextButton(if (historyOpen) "시장 보기" else "거래 내역", BaseScreen.skin)
-        historyButton.onClick {
-            historyOpen = !historyOpen
-            if (historyOpen) { performanceOpen = false; militaryMarketOpen = false; tradeMapOpen = false }
-            render()
-            parentTab.overviewScreen.resizePage(parentTab)
-        }
-        add(historyButton).left().row()
+            val pages = Table(BaseScreen.skin)
+            val mapButton = TextButton(if (tradeMapOpen) "무역 지도 ✓" else "무역 지도", BaseScreen.skin)
+            mapButton.onClick {
+                tradeMapOpen = true
+                historyOpen = false
+                performanceOpen = false
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            pages.add(mapButton).padRight(5f)
 
-        val perfButton = TextButton(
-            if (performanceOpen) "시장 보기" else "성능 진단",
-            BaseScreen.skin
-        )
-        perfButton.onClick {
-            performanceOpen = !performanceOpen
-            if (performanceOpen) { historyOpen = false; militaryMarketOpen = false; tradeMapOpen = false }
-            render()
-            parentTab.overviewScreen.resizePage(parentTab)
-        }
-        add(perfButton).left().row()
+            val historyButton = TextButton(if (historyOpen) "운송 내역 ✓" else "운송 내역", BaseScreen.skin)
+            historyButton.onClick {
+                historyOpen = true
+                tradeMapOpen = false
+                performanceOpen = false
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            pages.add(historyButton).padRight(5f)
 
-        val militaryButton = TextButton(
-            if (militaryMarketOpen) "시장 보기" else "군수 시장", BaseScreen.skin
-        )
-        militaryButton.onClick {
-            militaryMarketOpen = !militaryMarketOpen
-            if (militaryMarketOpen) { historyOpen = false; performanceOpen = false; tradeMapOpen = false }
-            render()
-            parentTab.overviewScreen.resizePage(parentTab)
+            val perfButton = TextButton(if (performanceOpen) "성능 진단 ✓" else "성능 진단", BaseScreen.skin)
+            perfButton.onClick {
+                performanceOpen = true
+                tradeMapOpen = false
+                historyOpen = false
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            pages.add(perfButton)
+            add(pages).left().row()
+        } else {
+            val merchantButton = TextButton("상단 · 무역 지도", BaseScreen.skin)
+            merchantButton.onClick {
+                parentTab.overviewScreen.select(EmpireOverviewCategories.Merchants, "")
+            }
+            add(merchantButton).left().row()
+
+            val militaryButton = TextButton(
+                if (militaryMarketOpen) "시장 보기" else "군수 시장", BaseScreen.skin
+            )
+            militaryButton.onClick {
+                militaryMarketOpen = !militaryMarketOpen
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            add(militaryButton).left().row()
         }
-        add(militaryButton).left().row()
         if (militaryMarketOpen) {
             add(MilitaryMarketSection(playerView) {
                 parentTab.overviewScreen.resizePage(parentTab)

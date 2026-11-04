@@ -34,6 +34,12 @@ enum class EmpireOverviewCategories(
                 TradesOverviewTab(viewingPlayer, overviewScreen)
         override fun showDisabled(viewingPlayer: CivView) = false
     },
+    // GS_MERCHANT_OVERVIEW_TAB_V1: logistics, trade map and merchant intelligence.
+    Merchants("StatIcons/Acquire", 'B', Align.top) {
+        override fun createTab(viewingPlayer: CivView, overviewScreen: EmpireOverviewScreen, persistedData: EmpireOverviewTabPersistableData?) =
+                MerchantOverviewTab(viewingPlayer, overviewScreen)
+        override fun showDisabled(viewingPlayer: CivView) = false
+    },
     Units("OtherIcons/Shield", 'U', Align.topLeft) {
         override fun createTab(viewingPlayer: CivView, overviewScreen: EmpireOverviewScreen, persistedData: EmpireOverviewTabPersistableData?) =
                 UnitOverviewTab(viewingPlayer, overviewScreen, persistedData)
