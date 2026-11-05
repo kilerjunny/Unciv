@@ -455,10 +455,18 @@ object NextTurnAutomation {
             }
         }
         GrandStrategyPerf.measure("unit_special_moves") {
-            for (unit in unitsInPriorityOrder()) {
+            // GS_AI_PERF_SAFE_V1: Sort only the units this pass can dispatch.
+            // Filtering a stable priority sort preserves the original relative order,
+            // including mods where a non-civilian has FoundCity.
+            val specialUnits = unitsAtStart.asSequence()
+                .filter { it.hasUnique(UniqueType.SpaceshipPart) || it.hasUnique(UniqueType.FoundCity) }
+                .filterNot { MilitaryMarket.isReservedUnit(it) }
+                .toList()
+                .sortedBy { getUnitPriority(it, isAtWar) }
+            GrandStrategyPerf.addCount("unit_special_candidates", specialUnits.size)
+            for (unit in specialUnits) {
                 // settlers need to move before automateSettlerEscorting(),
                 // move spaceship parts before that to make sure we're not blocking them
-                if (!unit.hasUnique(UniqueType.SpaceshipPart) && !unit.hasUnique(UniqueType.FoundCity)) continue
                 if (!isStillOurUnit(unit, civInfo)) continue
                 UnitAutomation.automateUnitMoves(unit)
             }
@@ -549,11 +557,13 @@ object NextTurnAutomation {
         // Melee units should focus on getting rid of enemy units that threaten the siege units
         // If there are no units, this means attacking the city
         val meleeUnits = ourUnitsInRange(5).filter { it.baseUnit.isMelee() }
+        // GS_AI_PERF_SAFE_V1: The city's radius-4 geographic tile set is immutable
+        // during this assault pass; calculate it once, not once for each melee unit.
+        val tilesToTarget = if (meleeUnits.isEmpty()) emptyList()
+            else city.getCenterTile().getTilesInDistance(4).toList()
         for (unit in meleeUnits.sortedByDescending { it.baseUnit.getForceEvaluation() }) {
             // We're so close, full speed ahead!
             if (city.health < city.getMaxHealth() / 5) attackIfPossible(unit, city.getCenterTile())
-            
-            val tilesToTarget = city.getCenterTile().getTilesInDistance(4).toList()
             
             val attackableEnemies = TargetHelper.getAttackableEnemies(unit,
                 unit.movement.getDistanceToTiles(), tilesToTarget)

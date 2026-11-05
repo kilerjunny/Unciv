@@ -549,16 +549,24 @@ object UnitAutomation {
     }
 
     private fun tryAccompanySettlerOrGreatPerson(unit: MapUnit): Boolean {
+        // GS_AI_PERF_SAFE_V1: The original search computed a full movement flood-fill
+        // for every military unit even when there was no eligible civilian to escort.
+        // Preserve the original unit ordering and tile/movement predicates.
+        val candidates = unit.civ.units.getCivUnits().filter {
+            it.isCivilian() &&
+                (it.hasUnique(UniqueType.FoundCity) || it.isGreatPerson()) &&
+                !it.hasUnique(UniqueType.StrengthBonusInRadius)
+        }.toList()
+        if (candidates.isEmpty()) {
+            GrandStrategyPerf.addCount("unit_escort_paths_skipped", 1)
+            return false
+        }
         val distanceToTiles = unit.movement.getDistanceToTiles()
-        val settlerOrGreatPersonToAccompany = unit.civ.units.getCivUnits()
-            .firstOrNull {
-                val tile = it.currentTile
-                it.isCivilian() &&
-                        (it.hasUnique(UniqueType.FoundCity) || it.isGreatPerson())
-                        && !it.hasUnique(UniqueType.StrengthBonusInRadius) // Exlude great generals, as they move independently after all military units
-                        && (tile == unit.currentTile || tile.militaryUnit == null && unit.movement.canMoveTo(tile))
-                        && distanceToTiles.containsKey(tile)
-            } ?: return false
+        val settlerOrGreatPersonToAccompany = candidates.firstOrNull {
+            val tile = it.currentTile
+            (tile == unit.currentTile || tile.militaryUnit == null && unit.movement.canMoveTo(tile)) &&
+                distanceToTiles.containsKey(tile)
+        } ?: return false
         unit.movement.headTowards(settlerOrGreatPersonToAccompany.currentTile)
         return true
     }

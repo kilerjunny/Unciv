@@ -78,7 +78,10 @@ object WorldMarketEconomicRoutePlanner {
         var settled = 0
         while (queue.isNotEmpty() && settled < MaxSettledTiles) {
             val current = queue.poll()
-            if (best[current.tile] != Score(current.cost, current.mainSteps)) continue // stale queue entry
+            // GS_AI_PERF_SAFE_V1: Avoid a temporary Score object per queue poll.
+            val currentBest = best[current.tile]
+            if (currentBest == null || currentBest.cost != current.cost ||
+                currentBest.mainSteps != current.mainSteps) continue // stale queue entry
             settled++
             if (current.tile in destinations) {
                 val reversed = ArrayList<Tile>()
@@ -105,8 +108,8 @@ object WorldMarketEconomicRoutePlanner {
                 val isMain = edge(current.tile.position, next.position) in main
                 val nextCost = current.cost + WorldMarketTerritoryCosts.stepCost(
                     current.tile, next, seller, buyer, isMain)
-                val nextMain = current.mainSteps +
-                    (if (edge(current.tile.position, next.position) in main) 1 else 0)
+                // GS_AI_PERF_SAFE_V1: Reuse the membership result from above.
+                val nextMain = current.mainSteps + (if (isMain) 1 else 0)
                 val previous = best[next]
                 // Cost remains the PRIMARY objective. A connected main corridor
                 // only wins a tie, never a more-expensive alternative.

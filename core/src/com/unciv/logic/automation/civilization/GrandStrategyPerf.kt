@@ -154,6 +154,9 @@ object GrandStrategyPerf {
         lines.add("전쟁 중 주요 문명: ${result.counts["war_civs"] ?: 0}개 / 활동 AI 문명: ${result.counts["ai_civs"] ?: 0}개")
         item("승급 처리", "unit_promotions")
         item("특수 유닛 이동", "unit_special_moves")
+        // GS_AI_PERF_SAFE_V1: only counters, not an additional timed phase.
+        lines.add("특수 이동 우선순위 정렬 대상: ${result.counts["unit_special_candidates"] ?: 0}기")
+        lines.add("호위 대상 없음: 이동 경로 탐색 ${result.counts["unit_escort_paths_skipped"] ?: 0}회 생략")
         item("호위 판단", "unit_escort")
         item("적 도시 점령 판단", "unit_city_assault")
         item("일반 유닛 이동", "unit_regular_moves")
