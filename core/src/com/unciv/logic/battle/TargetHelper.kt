@@ -21,6 +21,15 @@ object TargetHelper {
         val rangeOfAttack = unit.getRange()
         val attackableTiles = ArrayList<AttackableTile>()
 
+        // GS_AI_PATH_PRECHECK_V2: tilesToCheck is used for membership only.
+        // Larger lists (e.g. a 5-tile search radius) were scanned linearly
+        // for every candidate attack square. HashSet keeps identical membership
+        // semantics; tiny target lists avoid the allocation overhead.
+        val allowedTargets: Collection<Tile>? =
+            if (tilesToCheck != null && tilesToCheck.size > 8)
+                tilesToCheck.toHashSet()
+            else tilesToCheck
+
         val unitMustBeSetUp = unit.hasUnique(UniqueType.MustSetUp)
         val tilesToAttackFrom = if (stayOnTile || unit.baseUnit.isAirUnit())
             sequenceOf(Pair(unit.currentTile, unit.currentMovement))
@@ -66,7 +75,7 @@ object TargetHelper {
                         Battle.getMapCombatantOfTile(tile)
                     )
                     tile in tilesWithoutEnemies -> continue // avoid checking the same empty tile multiple times
-                    tileContainsAttackableEnemy(unit, tile, tilesToCheck) || unit.isPreparingAirSweep() -> {
+                    tileContainsAttackableEnemy(unit, tile, allowedTargets) || unit.isPreparingAirSweep() -> {
                         tilesWithEnemies += tile
                         attackableTiles += AttackableTile(
                             reachableTile, tile, movementLeft,
@@ -101,7 +110,7 @@ object TargetHelper {
             }
 
     @Readonly
-    private fun tileContainsAttackableEnemy(unit: MapUnit, tile: Tile, tilesToCheck: List<Tile>?): Boolean {
+    private fun tileContainsAttackableEnemy(unit: MapUnit, tile: Tile, tilesToCheck: Collection<Tile>?): Boolean {
         if (tile !in (tilesToCheck ?: unit.civ.viewableTiles) || !containsAttackableEnemy(tile, MapUnitCombatant(unit)) )
             return false
         val mapCombatant = Battle.getMapCombatantOfTile(tile)

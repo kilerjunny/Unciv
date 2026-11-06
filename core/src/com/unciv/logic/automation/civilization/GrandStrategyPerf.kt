@@ -169,6 +169,9 @@ object GrandStrategyPerf {
         item("근접 공격 판단", "unit_attack_scan")
         item("적 도시 목표 탐색", "unit_city_target")
         item("적 접근 판단", "unit_attack_advance")
+        // GS_AI_PATH_PRECHECK_V2: counts are per checked military AI decision,
+        // not a separate duration. Do not sum with pathfinding time.
+        lines.add("근접 적 없음: 이동범위 경로 탐색 ${result.counts["unit_advance_paths_skipped"] ?: 0}회 생략")
 
         val aiTotal = result.durations["phase_ai_total"] ?: 0L
         val start = result.durations["phase_turn_start"] ?: 0L

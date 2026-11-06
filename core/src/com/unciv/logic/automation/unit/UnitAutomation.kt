@@ -492,12 +492,26 @@ object UnitAutomation {
      *  Limited by [CLOSE_ENEMY_TURNS_AWAY_LIMIT] and [CLOSE_ENEMY_TILES_AWAY_LIMIT].
      *  Tiles attack from which would result in instant death of the [unit] are ignored. */
     private fun tryAdvanceTowardsCloseEnemy(unit: MapUnit): Boolean {
-        // this can be sped up if we check each layer separately
+        // GS_AI_PATH_PRECHECK_V2: TargetHelper will examine ONLY these tiles.
+        // The usual movement flood-fill is unnecessary if none of them contains
+        // an attackable enemy. Air-sweep and nuclear units return earlier from
+        // automateUnitMoves, so they never reach this precheck.
+        val nearbyTargets = unit.getTile()
+            .getTilesInDistance(CLOSE_ENEMY_TILES_AWAY_LIMIT).toList()
+        val attacker = MapUnitCombatant(unit)
+        if (nearbyTargets.none { TargetHelper.containsAttackableEnemy(it, attacker) }) {
+            GrandStrategyPerf.addCount("unit_advance_paths_skipped", 1)
+            return false
+        }
+        // At least one candidate exists: retain the original movement limits,
+        // combat filtering and final target choice without any AI rule changes.
         val unitDistanceToTiles = unit.movement.getMovementToTilesAtPosition(
                 unit.getTile().position,
                 unit.getMaxMovement() * CLOSE_ENEMY_TURNS_AWAY_LIMIT
         )
-        val closeEnemy = TargetHelper.getAttackableEnemies(unit, unitDistanceToTiles, tilesToCheck = unit.getTile().getTilesInDistance(CLOSE_ENEMY_TILES_AWAY_LIMIT).toList())
+        val closeEnemy = TargetHelper.getAttackableEnemies(
+            unit, unitDistanceToTiles, tilesToCheck = nearbyTargets
+        )
             .filterNot { unit.baseUnit.isRanged() && it.tileToAttack.isCityCenter() && it.tileToAttack.getCity()!!.health == 1 } // occurs fairly often probably because AI dumb
             .filter { unit.getDamageFromTerrain(it.tileToAttackFrom) <= 0 }  // Don't attack from a mountain or near enemy citadels
             .filter {
