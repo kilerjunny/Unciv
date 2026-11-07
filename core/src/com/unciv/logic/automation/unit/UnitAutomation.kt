@@ -30,6 +30,7 @@ import yairm210.purity.annotations.Readonly
 import com.unciv.logic.automation.Timers.Companion.timeThis
 import com.unciv.logic.automation.civilization.NextTurnAutomation
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
+import com.unciv.logic.automation.civilization.StrategicDeploymentAI
 import com.unciv.logic.market.MilitaryMarketReturnHome
 
 object UnitAutomation {
@@ -109,6 +110,10 @@ object UnitAutomation {
         if (GrandStrategyPerf.measure("unit_city_target") { HeadTowardsEnemyCityAutomation.tryHeadTowardsEnemyCity(unit) }) return
 
         if (tryHeadTowardsEncampment(unit)) return
+
+        // GS_STRATEGIC_DEPLOYMENT_AI_V1: after combat, before default garrison/exploration.
+        if (unit.civ.isAI() && !unit.civ.isAtWar() &&
+            GrandStrategyPerf.measure("unit_strategic_deployment") { StrategicDeploymentAI.tryDeploy(unit) }) return
 
         if (tryGarrisoningLandUnit(unit)) return
 

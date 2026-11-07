@@ -169,6 +169,13 @@ object GrandStrategyPerf {
         item("근접 공격 판단", "unit_attack_scan")
         item("적 도시 목표 탐색", "unit_city_target")
         item("적 접근 판단", "unit_attack_advance")
+        // GS_STRATEGIC_DEPLOYMENT_AI_V1: included within regular unit AI time.
+        item("평시 전략 배치 판단", "unit_strategic_deployment")
+        lines.add("전략 배치 계획 갱신: ${result.counts["strategic_deploy_replans"] ?: 0}회 / " +
+            "배정 유닛: ${result.counts["strategic_deploy_assigned"] ?: 0}기")
+        lines.add("전략 주둔 유지: ${result.counts["strategic_deploy_holding"] ?: 0}회 / " +
+            "전략 재배치 이동: ${result.counts["strategic_deploy_moves"] ?: 0}회 / " +
+            "경로 불가: ${result.counts["strategic_deploy_unreachable"] ?: 0}회")
         // GS_AI_PATH_PRECHECK_V2: counts are per checked military AI decision,
         // not a separate duration. Do not sum with pathfinding time.
         lines.add("근접 적 없음: 이동범위 경로 탐색 ${result.counts["unit_advance_paths_skipped"] ?: 0}회 생략")
