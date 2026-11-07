@@ -3,6 +3,7 @@ package com.unciv.logic.civilization.managers
 import com.unciv.UncivGame
 import com.unciv.logic.VictoryData
 import com.unciv.logic.automation.civilization.NextTurnAutomation
+import com.unciv.logic.automation.civilization.GrandStrategyPerf
 import com.unciv.logic.city.managers.CityTurnManager
 import com.unciv.logic.civilization.*
 import com.unciv.logic.civilization.diplomacy.DiplomacyTurnManager.nextTurn
@@ -23,33 +24,40 @@ import kotlin.math.min
 import com.unciv.logic.automation.Timers.Companion.timeThis
 
 class TurnManager(val civInfo: Civilization) {
+    // GS_TURN_PHASE_PROFILE_V3: scoped diagnostic timers only.
 
 
     fun startTurn(progressBar: NextTurnProgress? = null):Unit = timeThis("TurnManager.startTurn") {
         if (civInfo.isSpectator()) return
 
         // Grand Strategy: eliminate stale unit references once the new turn starts.
-        val formationManager = grandstrategy.formations.FormationManager(civInfo.grandStrategyFormations)
-        formationManager.reconcileLiveUnits(civInfo.units.getCivUnits().map { it.id.toString() }.toSet())
-        civInfo.grandStrategyFormations = formationManager.snapshot()
+        GrandStrategyPerf.measure("turn_start_formations") {
+            val formationManager = grandstrategy.formations.FormationManager(civInfo.grandStrategyFormations)
+            formationManager.reconcileLiveUnits(civInfo.units.getCivUnits().map { it.id.toString() }.toSet())
+            civInfo.grandStrategyFormations = formationManager.snapshot()
+        }
 
         for (city in civInfo.cities) city.hasSoldBuildingThisTurn = false
 
         civInfo.threatManager.clear()
 
         if (civInfo.cities.isNotEmpty() && civInfo.gameInfo.ruleset.technologies.isNotEmpty())
-            civInfo.tech.updateResearchProgress()
+            GrandStrategyPerf.measure("turn_start_research") { civInfo.tech.updateResearchProgress() }
 
-        civInfo.cache.updateCivResources() // If you offered a trade last turn, this turn it will have been accepted/declined
-        for (stockpiledResource in civInfo.getCivResourceSupply().filter { it.resource.isStockpiled })
-            civInfo.gainStockpiledResource(stockpiledResource.resource, stockpiledResource.amount)
+        GrandStrategyPerf.measure("turn_start_resources") {
+            civInfo.cache.updateCivResources() // If you offered a trade last turn, this turn it will have been accepted/declined
+            for (stockpiledResource in civInfo.getCivResourceSupply().filter { it.resource.isStockpiled })
+                civInfo.gainStockpiledResource(stockpiledResource.resource, stockpiledResource.amount)
+        }
 
         // Grand Strategy: reconcile outstanding market sell orders.
-        WorldMarketOrders.reconcileSellerOrders(civInfo)
+        GrandStrategyPerf.measure("turn_start_market_orders") { WorldMarketOrders.reconcileSellerOrders(civInfo) }
 
-        civInfo.civConstructions.startTurn()
+        GrandStrategyPerf.measure("turn_start_constructions") { civInfo.civConstructions.startTurn() }
         civInfo.attacksSinceTurnStart.clear()
-        civInfo.updateStatsForNextTurn() // for things that change when turn passes e.g. golden age, city state influence
+        GrandStrategyPerf.measure("turn_start_stats") {
+            civInfo.updateStatsForNextTurn() // for things that change when turn passes e.g. golden age, city state influence
+        }
 
         // Do this after updateStatsForNextTurn but before cities.startTurn
         if (civInfo.playerType == PlayerType.AI && civInfo.gameInfo.ruleset.modOptions.hasUnique(UniqueType.ConvertGoldToScience))
@@ -64,26 +72,34 @@ class TurnManager(val civInfo: Civilization) {
                     civInfo.units.addUnit(greatPerson)
                 greatPerson = civInfo.greatPeople.getNewGreatPerson()
             }
-            civInfo.religionManager.startTurn()
+            GrandStrategyPerf.measure("turn_start_religion") { civInfo.religionManager.startTurn() }
             if (civInfo.isLongCountActive())
                 MayaCalendar.startTurnForMaya(civInfo)
         }
 
-        civInfo.cache.updateViewableTiles() // adds explored tiles so that the units will be able to perform automated actions better
-        civInfo.cache.updateCitiesConnectedToCapital()
-        startTurnFlags()
-        updateRevolts()
+        GrandStrategyPerf.measure("turn_start_vision") {
+            civInfo.cache.updateViewableTiles() // adds explored tiles so that the units will be able to perform automated actions better
+        }
+        GrandStrategyPerf.measure("turn_start_city_connections") { civInfo.cache.updateCitiesConnectedToCapital() }
+        GrandStrategyPerf.measure("turn_start_flags_revolts") {
+            startTurnFlags()
+            updateRevolts()
+        }
 
         civInfo.forEachTriggeredUnique(UniqueType.TriggerUponTurnStart, civInfo.state, ignoreCities = true) { unique ->
             UniqueTriggerActivation.triggerUnique(unique, civInfo)
         }
 
-        for (city in civInfo.cities) {
-            progressBar?.increment()
-            CityTurnManager(city).startTurn()  // Most expensive part of startTurn
+        GrandStrategyPerf.measure("turn_start_cities") {
+            for (city in civInfo.cities) {
+                progressBar?.increment()
+                CityTurnManager(city).startTurn()  // Most expensive part of startTurn
+            }
         }
 
-        for (unit in civInfo.units.getCivUnits()) UnitTurnManager(unit).startTurn()
+        GrandStrategyPerf.measure("turn_start_units") {
+            for (unit in civInfo.units.getCivUnits()) UnitTurnManager(unit).startTurn()
+        }
 
         if (civInfo.playerType == PlayerType.Human && UncivGame.Current.settings.automatedUnitsMoveOnTurnStart) {
             civInfo.hasMovedAutomatedUnits = true
@@ -263,10 +279,14 @@ class TurnManager(val civInfo: Civilization) {
 
     fun endTurn(progressBar: NextTurnProgress? = null):Unit = timeThis("TurnManager.endTurn") {
         if (UncivGame.Current.settings.citiesAutoBombardAtEndOfTurn)
-            NextTurnAutomation.automateCityBombardment(civInfo) // Bombard with all cities that haven't, maybe you missed one
+            GrandStrategyPerf.measure("turn_end_bombard") {
+                NextTurnAutomation.automateCityBombardment(civInfo) // Bombard with all cities that haven't, maybe you missed one
+            }
 
-        civInfo.forEachTriggeredUnique(UniqueType.TriggerUponTurnEnd, civInfo.state, ignoreCities = true) { unique ->
-            UniqueTriggerActivation.triggerUnique(unique, civInfo)
+        GrandStrategyPerf.measure("turn_end_triggers") {
+            civInfo.forEachTriggeredUnique(UniqueType.TriggerUponTurnEnd, civInfo.state, ignoreCities = true) { unique ->
+                UniqueTriggerActivation.triggerUnique(unique, civInfo)
+            }
         }
 
         val notificationsLog = civInfo.notificationsLog
@@ -285,15 +305,16 @@ class TurnManager(val civInfo: Civilization) {
 
         if (civInfo.isDefeated() || civInfo.isSpectator()) return  // yes they do call this, best not update any further stuff
         
-        var nextTurnStats =
+        var nextTurnStats = GrandStrategyPerf.measure("turn_end_stats") {
             if (civInfo.isBarbarian)
                 Stats()
             else {
                 civInfo.updateStatsForNextTurn()
                 civInfo.stats.statsForNextTurn
             }
+        }
 
-        civInfo.policies.endTurn(nextTurnStats.culture.toInt())
+        GrandStrategyPerf.measure("turn_end_policies") { civInfo.policies.endTurn(nextTurnStats.culture.toInt()) }
         civInfo.totalCultureForContests += nextTurnStats.culture.toInt()
 
         if (civInfo.isCityState) {
@@ -326,31 +347,38 @@ class TurnManager(val civInfo: Civilization) {
             }
         }
 
-        civInfo.addGold(nextTurnStats.gold.toInt() )
+        GrandStrategyPerf.measure("turn_end_income") { civInfo.addGold(nextTurnStats.gold.toInt() ) }
 
         if (civInfo.cities.isNotEmpty() && civInfo.gameInfo.ruleset.technologies.isNotEmpty())
-            civInfo.tech.endTurn(nextTurnStats.science.toInt())
+            GrandStrategyPerf.measure("turn_end_research") { civInfo.tech.endTurn(nextTurnStats.science.toInt()) }
 
-        civInfo.religionManager.endTurn(nextTurnStats.faith.toInt())
+        GrandStrategyPerf.measure("turn_end_religion") { civInfo.religionManager.endTurn(nextTurnStats.faith.toInt()) }
         civInfo.totalFaithForContests += nextTurnStats.faith.toInt()
 
-        civInfo.espionageManager.endTurn()
+        GrandStrategyPerf.measure("turn_end_espionage") { civInfo.espionageManager.endTurn() }
 
         if (civInfo.isMajorCiv()) // City-states don't get great people!
             civInfo.greatPeople.addGreatPersonPoints()
 
         // To handle tile's owner issue (#8246), we need to run cities being razed first.
         // a city can be removed while iterating (if it's being razed) so we need to iterate over a copy - sorting does one
-        for (city in civInfo.cities.sortedByDescending { it.isBeingRazed }) {
-            progressBar?.increment()
-            CityTurnManager(city).endTurn()
+        GrandStrategyPerf.measure("turn_end_cities") {
+            for (city in civInfo.cities.sortedByDescending { it.isBeingRazed }) {
+                progressBar?.increment()
+                CityTurnManager(city).endTurn()
+            }
         }
 
-        civInfo.temporaryUniques.endTurn()
-
-        civInfo.goldenAges.endTurn(civInfo.getHappiness())
-        civInfo.units.getCivUnits().forEach { UnitTurnManager(it).endTurn() }  // This is the most expensive part of endTurn
-        civInfo.diplomacy.values.toList().forEach { it.nextTurn() } // we copy the diplomacy values so if it changes in-loop we won't crash
+        GrandStrategyPerf.measure("turn_end_temporary_happiness") {
+            civInfo.temporaryUniques.endTurn()
+            civInfo.goldenAges.endTurn(civInfo.getHappiness())
+        }
+        GrandStrategyPerf.measure("turn_end_units") {
+            civInfo.units.getCivUnits().forEach { UnitTurnManager(it).endTurn() }  // This is the most expensive part of endTurn
+        }
+        GrandStrategyPerf.measure("turn_end_diplomacy") {
+            civInfo.diplomacy.values.toList().forEach { it.nextTurn() } // we copy the diplomacy values so if it changes in-loop we won't crash
+        }
         civInfo.cache.updateHasActiveEnemyMovementPenalty()
 
         civInfo.resetMilitaryMightCache()

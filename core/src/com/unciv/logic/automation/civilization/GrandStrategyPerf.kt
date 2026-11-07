@@ -183,6 +183,44 @@ object GrandStrategyPerf {
         lines.add("AI 자동화 기타: ${ms(aiOther)} ms")
         lines.add("턴 시작 갱신: ${ms(start)} ms")
         lines.add("턴 종료 갱신: ${ms(end)} ms")
+        // GS_TURN_PHASE_PROFILE_V3: all values below are INCLUDED in the phase totals above.
+        val startDetails = listOf(
+            "편제 유닛 정리" to "turn_start_formations",
+            "연구 진행" to "turn_start_research",
+            "자원·비축 갱신" to "turn_start_resources",
+            "시장 주문 조정" to "turn_start_market_orders",
+            "건설 처리" to "turn_start_constructions",
+            "문명 턴 통계" to "turn_start_stats",
+            "종교 시작" to "turn_start_religion",
+            "시야·탐색 갱신" to "turn_start_vision",
+            "수도 연결 도시" to "turn_start_city_connections",
+            "국가 상태·반란" to "turn_start_flags_revolts",
+            "도시 시작 갱신" to "turn_start_cities",
+            "유닛 시작 갱신" to "turn_start_units"
+        )
+        val endDetails = listOf(
+            "도시 자동 포격" to "turn_end_bombard",
+            "종료 트리거" to "turn_end_triggers",
+            "문명 통계 재계산" to "turn_end_stats",
+            "정책 처리" to "turn_end_policies",
+            "금 수입 정산" to "turn_end_income",
+            "연구 종료" to "turn_end_research",
+            "종교 종료" to "turn_end_religion",
+            "첩보 종료" to "turn_end_espionage",
+            "도시 종료 갱신" to "turn_end_cities",
+            "임시 효과·행복" to "turn_end_temporary_happiness",
+            "유닛 종료 갱신" to "turn_end_units",
+            "외교 관계 갱신" to "turn_end_diplomacy"
+        )
+        lines.add("---- 턴 시작 상세 (턴 시작 갱신에 포함) ----")
+        for ((label, key) in startDetails) item(label, key)
+        val measuredStart = startDetails.sumOf { (_, key) -> result.durations[key] ?: 0L }
+        lines.add("시작 기타·미계측: ${ms((start - measuredStart).coerceAtLeast(0L))} ms")
+        lines.add("---- 턴 종료 상세 (턴 종료 갱신에 포함) ----")
+        for ((label, key) in endDetails) item(label, key)
+        val measuredEnd = endDetails.sumOf { (_, key) -> result.durations[key] ?: 0L }
+        lines.add("종료 기타·미계측: ${ms((end - measuredEnd).coerceAtLeast(0L))} ms")
+        lines.add("※ 상세 계측은 소량의 오버헤드를 포함합니다. 상위 시간과 합산하지 마세요.")
         lines.add("나머지/관리 작업: ${ms(remaining)} ms")
         lines.add("※ 경로/공격 판단은 유닛 AI 시간에 포함되므로 합산하지 마세요.")
         lines.add("단위: ms (1,000ms = 1초)")
