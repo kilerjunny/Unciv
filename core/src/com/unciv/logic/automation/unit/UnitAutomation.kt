@@ -29,6 +29,7 @@ import com.unciv.view.GameView
 import yairm210.purity.annotations.Readonly
 import com.unciv.logic.automation.Timers.Companion.timeThis
 import com.unciv.logic.automation.civilization.NextTurnAutomation
+import com.unciv.logic.automation.civilization.StrategicDeploymentAI
 
 object UnitAutomation {
 
@@ -102,6 +103,10 @@ object UnitAutomation {
         if (HeadTowardsEnemyCityAutomation.tryHeadTowardsEnemyCity(unit)) return
 
         if (tryHeadTowardsEncampment(unit)) return
+
+        // GS_STRATEGIC_DEPLOYMENT_PC_V1: peaceful AI military garrison planning.
+        if (unit.civ.isAI() && !unit.civ.isAtWar() &&
+            StrategicDeploymentAI.tryDeploy(unit)) return
 
         if (tryGarrisoningLandUnit(unit)) return
 
