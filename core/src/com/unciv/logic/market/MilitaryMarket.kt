@@ -309,6 +309,9 @@ object MilitaryMarket {
         val origin = unit.getTile()
         unit.gift(buyer) // Transfer SAME unit without spawning or teleporting.
         unit.currentMovement = 0f
+        // GS_MILITARY_MARKET_HOMEBOUND_V1: peacetime AI return order, persisted in GameInfo.
+        if (buyer.isAI() && unit.isMilitary())
+            game.militaryMarketReturnHomeUnits[unit.id] = buyer.civID
         seller.addGold(contract.price)
         game.militaryMarketContracts.remove(contract)
         log(game, contract, "인도 완료")
@@ -325,6 +328,13 @@ object MilitaryMarket {
 
     /** Reconcile once per game turn; auto-dismiss invalid deals and stale public listings. */
     fun reconcile(game: GameInfo) {
+        // GS_MILITARY_MARKET_HOMEBOUND_V1: discard orders for destroyed/transferred units.
+        if (game.militaryMarketReturnHomeUnits.isNotEmpty())
+            game.militaryMarketReturnHomeUnits.entries.removeAll { (unitId, buyerId) ->
+                val buyer = game.getCivilizationOrNull(buyerId)
+                buyer == null || buyer.isDefeated() ||
+                    buyer.units.getCivUnits().none { it.id == unitId && !it.isDestroyed }
+            }
         game.militaryMarketListings.removeAll { listing ->
             val seller = game.getCivilizationOrNull(listing.sellerCivId)
             val city = seller?.cities?.firstOrNull { it.id == listing.sellerCityId }

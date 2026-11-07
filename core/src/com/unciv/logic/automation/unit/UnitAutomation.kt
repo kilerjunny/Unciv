@@ -30,6 +30,7 @@ import yairm210.purity.annotations.Readonly
 import com.unciv.logic.automation.Timers.Companion.timeThis
 import com.unciv.logic.automation.civilization.NextTurnAutomation
 import com.unciv.logic.automation.civilization.GrandStrategyPerf
+import com.unciv.logic.market.MilitaryMarketReturnHome
 
 object UnitAutomation {
 
@@ -44,6 +45,8 @@ object UnitAutomation {
 
         // Might die next turn - move!
         if (unit.getDamageFromTerrain() > 0 && tryHealUnit(unit)) return
+        // GS_MILITARY_MARKET_HOMEBOUND_V1: only recently delivered AI purchases.
+        if (unit.civ.isAI() && MilitaryMarketReturnHome.tryReturn(unit)) return
 
 
         if (unit.isCivilian()) {
