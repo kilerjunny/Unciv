@@ -311,7 +311,7 @@ object MilitaryMarket {
         unit.currentMovement = 0f
         // GS_MILITARY_MARKET_HOMEBOUND_V1: peacetime AI return order, persisted in GameInfo.
         if (buyer.isAI() && unit.isMilitary())
-            game.militaryMarketReturnHomeUnits[unit.id] = buyer.civID
+            game.militaryMarketReturnHomeUnits[unit.id.toString()] = buyer.civID
         seller.addGold(contract.price)
         game.militaryMarketContracts.remove(contract)
         log(game, contract, "인도 완료")
@@ -330,9 +330,12 @@ object MilitaryMarket {
     fun reconcile(game: GameInfo) {
         // GS_MILITARY_MARKET_HOMEBOUND_V1: discard orders for destroyed/transferred units.
         if (game.militaryMarketReturnHomeUnits.isNotEmpty())
-            game.militaryMarketReturnHomeUnits.entries.removeAll { (unitId, buyerId) ->
+            game.militaryMarketReturnHomeUnits.entries.removeAll { (unitKey, buyerId) ->
+                // Existing saves deserialize JSON map keys as String, even if an
+                // earlier Kotlin declaration incorrectly expected Int keys.
+                val unitId = unitKey.toIntOrNull()
                 val buyer = game.getCivilizationOrNull(buyerId)
-                buyer == null || buyer.isDefeated() ||
+                unitId == null || buyer == null || buyer.isDefeated() ||
                     buyer.units.getCivUnits().none { it.id == unitId && !it.isDestroyed }
             }
         game.militaryMarketListings.removeAll { listing ->

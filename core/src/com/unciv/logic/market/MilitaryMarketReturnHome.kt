@@ -17,14 +17,16 @@ object MilitaryMarketReturnHome {
     fun tryReturn(unit: MapUnit): Boolean {
         val civ = unit.civ
         val pending = civ.gameInfo.militaryMarketReturnHomeUnits
-        val assignedCiv = pending[unit.id] ?: return false
+        if (pending.isEmpty()) return false
+        val unitKey = unit.id.toString()
+        val assignedCiv = pending[unitKey] ?: return false
         if (assignedCiv != civ.civID || unit.isDestroyed) {
-            pending.remove(unit.id)
+            pending.remove(unitKey)
             return false
         }
         if (!civ.isAI()) return false // A human buyer always controls purchased units.
         if (unit.getTile().getOwner() == civ) {
-            pending.remove(unit.id)
+            pending.remove(unitKey)
             return false // Arrived: resume ordinary AI from now on.
         }
         if (civ.isAtWar()) return false // War AI takes priority; resume after peace.
@@ -56,7 +58,7 @@ object MilitaryMarketReturnHome {
             if (checked++ >= MaxPathChecks) break
             if (!unit.movement.canReach(target)) continue
             unit.movement.headTowards(target)
-            if (unit.getTile().getOwner() == civ) pending.remove(unit.id)
+            if (unit.getTile().getOwner() == civ) pending.remove(unitKey)
             return true
         }
         // No reachable home tile: never teleport or freeze all AI behavior.

@@ -123,8 +123,9 @@ class GameInfo : IsPartOfGameInfoSerialization, HasGameInfoSerializationVersion 
     var militaryMarketHistory = ArrayList<MilitaryMarketHistoryEntry>()
     var militaryMarketListings = ArrayList<MilitaryMarketListing>()
     var militaryMarketAILastOrderTurn = HashMap<String, Int>()
-    // GS_MILITARY_MARKET_HOMEBOUND_V1: global unique unit ID -> buyer civ ID.
-    var militaryMarketReturnHomeUnits = HashMap<Int, String>()
+    // GS_MILITARY_MARKET_HOMEBOUND_KEY_FIX_V1: JSON object keys are strings.
+    // Keep this property name so existing saved games retain return orders.
+    var militaryMarketReturnHomeUnits = HashMap<String, String>()
     var barbarians = BarbarianManager()
     var religions: HashMap<String, Religion> = hashMapOf()
     var difficulty = "Chieftain" // difficulty is game-wide, think what would happen if 2 human players could play on different difficulties?
