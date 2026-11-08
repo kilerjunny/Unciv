@@ -10,17 +10,21 @@ import com.unciv.models.ruleset.unique.UniqueType
 import java.util.WeakHashMap
 
 /**
- * GS_STRATEGIC_DEPLOYMENT_AI_V1
- * Peacetime defensive deployment for AI major civilizations.
+ * GS_STRATEGIC_DEPLOYMENT_AI_V2
+ * Peacetime deployment for AI major civilizations. Existing land garrison slots
+ * are retained; EVERY eligible naval unit gets a friendly naval-base objective
+ * even after the normal guard slots have been filled.
  *
- * Assign a bounded number of garrisons to capitals, border cities and
- * overseas cities. Units not assigned a defensive slot use ordinary Unciv AI.
- * Plans are transient, derived from the current map, and renewed every 5 turns.
- * The plan stores IDs only (no tile/unit references or save-file changes).
+ * Plans keep only unit and city IDs, not live game objects, and refresh after
+ * five turns. Each unreachable naval port is attempted at most once per plan,
+ * with a different friendly port tried on a later turn. No teleportation.
  */
 object StrategicDeploymentAI {
     private const val PLAN_INTERVAL = 5
-    private const val MAX_REACH_CHECKS_PER_DECISION = 3
+    private const val MAX_LAND_REACH_CHECKS = 3
+    private const val MAX_NAVAL_REACH_CHECKS = 2
+    private const val NAVAL_GUARD_RADIUS = 2
+    private const val NAVAL_RESERVE_RADIUS = 4
 
     private data class Goal(
         val city: City,
@@ -33,13 +37,17 @@ object StrategicDeploymentAI {
     private class Plan(
         val turn: Int,
         val cityCount: Int,
-        val assignments: Map<Int, String>
+        val assignments: Map<Int, String>,
+        val navalPortOrder: Map<Int, List<String>>,
+        val navalGuards: Set<Int>
     ) {
-        // Failed paths are only remembered until the next plan refresh.
-        val unreachable = HashSet<Int>()
+        // Old land path behavior: don't repeat expensive checks during a plan.
+        val unreachableLand = HashSet<Int>()
+        // Navy: a failed port is skipped, but another port may be tried next turn.
+        val failedNavalPorts = HashMap<Int, MutableSet<String>>()
     }
 
-    // Weak keys prevent leaked plans when a GameInfo is discarded or cloned.
+    // Weak keys + values containing IDs only avoid retaining discarded games.
     private val plans = WeakHashMap<Civilization, Plan>()
 
     private fun eligible(unit: MapUnit): Boolean =
@@ -48,7 +56,8 @@ object StrategicDeploymentAI {
             !unit.isTransported && !unit.isEscorting() &&
             !unit.hasUnique(UniqueType.FoundCity) &&
             !unit.hasUnique(UniqueType.BuildImprovements) &&
-            !unit.isExploring() && !MilitaryMarket.isReservedUnit(unit)
+            (!unit.isExploring() || unit.baseUnit.isWaterUnit) &&
+            !MilitaryMarket.isReservedUnit(unit)
 
     @Synchronized
     private fun planFor(civ: Civilization): Plan {
@@ -84,8 +93,8 @@ object StrategicDeploymentAI {
         val naval = military.filter { it.baseUnit.isWaterUnit }.toMutableList()
         val assigned = HashMap<Int, String>()
 
-        // Assign scarce units to important goals first, preferring units already
-        // nearby or on the same continent. No path search during this planning pass.
+        // Preserve the v1 land and principal-port garrison priorities.
+        // The planning pass itself does not calculate a single movement path.
         fun assignTo(goal: Goal, pool: MutableList<MapUnit>, slots: Int) {
             repeat(slots) {
                 val center = goal.city.getCenterTile()
@@ -102,42 +111,79 @@ object StrategicDeploymentAI {
         for (goal in goals) assignTo(goal, land, goal.landSlots)
         for (goal in goals) assignTo(goal, naval, goal.navalSlots)
 
-        val plan = Plan(turn, civ.cities.size, assigned)
+        // After guard slots, remaining ships still need a peacetime base.
+        // Spread reserves among nearby naval cities instead of sending everyone
+        // to the capital. Overseas ports remain legitimate permanent stations.
+        val navalGuards = military.asSequence()
+            .filter { it.baseUnit.isWaterUnit && it.id in assigned }
+            .map { it.id }.toHashSet()
+        val navalGoals = goals.filter { it.navalSlots > 0 }
+        val reserveLoads = HashMap<String, Int>()
+        for (ship in naval) {
+            val goal = navalGoals.minWithOrNull(compareBy<Goal> { port ->
+                val distance = ship.currentTile.aerialDistanceTo(port.city.getCenterTile())
+                distance * 4 + (reserveLoads[port.city.id] ?: 0) * 5 - port.priority / 3
+            }.thenBy { it.city.id }) ?: continue // No owned harbor; use stock AI.
+            assigned[ship.id] = goal.city.id
+            reserveLoads[goal.city.id] = (reserveLoads[goal.city.id] ?: 0) + 1
+        }
+
+        // Alternative port IDs are calculated ONCE per plan, not every AI turn.
+        // Original guard or reserve assignment is always first.
+        val portOrder = HashMap<Int, List<String>>()
+        for (ship in military) {
+            if (!ship.baseUnit.isWaterUnit) continue
+            val preferred = assigned[ship.id] ?: continue
+            val alternatives = navalGoals.sortedWith(compareBy<Goal> { port ->
+                ship.currentTile.aerialDistanceTo(port.city.getCenterTile()) - port.priority / 8
+            }.thenBy { it.city.id }).map { it.city.id }
+            portOrder[ship.id] = listOf(preferred) + alternatives.filter { it != preferred }
+        }
+
+        val plan = Plan(turn, civ.cities.size, assigned, portOrder, navalGuards)
         plans[civ] = plan
         GrandStrategyPerf.addCount("strategic_deploy_replans", 1)
         GrandStrategyPerf.addCount("strategic_deploy_assigned", assigned.size)
+        GrandStrategyPerf.addCount("strategic_naval_assigned", portOrder.size)
         return plan
     }
 
-    /**
-     * Return true when a defensive assignment handled the unit's decision.
-     * Combat, healing and hostile-camp behavior are checked earlier by
-     * UnitAutomation, and any wartime uses the stock military AI.
-     */
+    /** Return true when a defensive assignment handled the unit's decision. */
     fun tryDeploy(unit: MapUnit): Boolean {
         val civ = unit.civ
         if (!civ.isAI() || !civ.isMajorCiv() || civ.isAtWar() ||
             !eligible(unit) || civ.cities.isEmpty()) return false
         val plan = planFor(civ)
-        val destinationCityId = plan.assignments[unit.id] ?: return false
+        val naval = unit.baseUnit.isWaterUnit
+        val destinationCityId = if (naval) {
+            val failed = plan.failedNavalPorts.getOrPut(unit.id) { HashSet() }
+            plan.navalPortOrder[unit.id]?.firstOrNull { it !in failed }
+        } else plan.assignments[unit.id]
+        if (destinationCityId == null) return false
         val city = civ.cities.firstOrNull { it.id == destinationCityId } ?: return false
         val center = city.getCenterTile()
         val origin = unit.currentTile
-        val naval = unit.baseUnit.isWaterUnit
 
-        // A garrison in the assigned city's local area holds position. For land
-        // units, fill the city centre first when it is empty, then guard nearby.
-        val inArea = origin.aerialDistanceTo(center) <= 2 &&
+        // Reserve ships can patrol within four tiles of their assigned harbor;
+        // principal guards stay closer. Avoid fleet congestion in city centers.
+        val radius = if (naval) {
+            if (unit.id in plan.navalGuards) NAVAL_GUARD_RADIUS else NAVAL_RESERVE_RADIUS
+        } else 2
+        val inArea = origin.aerialDistanceTo(center) <= radius &&
             (origin.getOwner() == civ || naval && origin.getOwner() == null) &&
             (if (naval) origin.isWater else origin.isLand)
         val unoccupiedLandGarrison = !naval && center.militaryUnit == null
         if (inArea && !unoccupiedLandGarrison) {
             GrandStrategyPerf.addCount("strategic_deploy_holding", 1)
+            if (naval) GrandStrategyPerf.addCount("strategic_naval_holding", 1)
             return true
         }
-        if (!unit.hasMovement() || unit.id in plan.unreachable) return false
+        // A ship that has used its movement will retry next turn. Don't send
+        // it into the stock wandering AI just because its movement is zero.
+        if (!unit.hasMovement()) return naval
+        if (!naval && unit.id in plan.unreachableLand) return false
 
-        val destinations = center.getTilesInDistance(2)
+        val destinations = center.getTilesInDistance(radius)
             .filter { tile ->
                 !tile.isImpassible() &&
                     (tile.militaryUnit == null || tile.militaryUnit == unit) &&
@@ -150,9 +196,10 @@ object StrategicDeploymentAI {
             .toList()
 
         var checks = 0
+        val maxChecks = if (naval) MAX_NAVAL_REACH_CHECKS else MAX_LAND_REACH_CHECKS
         for (tile in destinations) {
             if (tile == origin || !unit.movement.canMoveTo(tile)) continue
-            if (checks >= MAX_REACH_CHECKS_PER_DECISION) break
+            if (checks >= maxChecks) break
             checks++
             if (!unit.movement.canReach(tile)) continue
             try {
@@ -160,15 +207,23 @@ object StrategicDeploymentAI {
                 unit.movement.headTowards(tile)
                 if (unit.currentTile != before) {
                     GrandStrategyPerf.addCount("strategic_deploy_moves", 1)
+                    if (naval) GrandStrategyPerf.addCount("strategic_naval_moves", 1)
                     return true
                 }
             } catch (_: UnitMovement.UnreachableDestinationException) {
-                // Tile occupancy may change between path query and movement.
+                // Ships and other units may change occupancy during the AI turn.
             }
         }
-        // Don't repeatedly search unreachable overseas or blocked goals.
-        plan.unreachable.add(unit.id)
+
+        if (naval) {
+            // Retry a different friendly naval city next peaceful turn instead
+            // of giving up on the ship for the entire planning period.
+            plan.failedNavalPorts.getOrPut(unit.id) { HashSet() }.add(destinationCityId)
+            GrandStrategyPerf.addCount("strategic_naval_port_failures", 1)
+            return false // Keep stock AI fallback if no base was reachable.
+        }
+        plan.unreachableLand.add(unit.id)
         GrandStrategyPerf.addCount("strategic_deploy_unreachable", 1)
-        return false // Existing AI may find a different useful action.
+        return false
     }
 }

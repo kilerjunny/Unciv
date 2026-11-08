@@ -176,6 +176,11 @@ object GrandStrategyPerf {
         lines.add("전략 주둔 유지: ${result.counts["strategic_deploy_holding"] ?: 0}회 / " +
             "전략 재배치 이동: ${result.counts["strategic_deploy_moves"] ?: 0}회 / " +
             "경로 불가: ${result.counts["strategic_deploy_unreachable"] ?: 0}회")
+        // GS_STRATEGIC_DEPLOYMENT_AI_V2: already included in unit AI timing.
+        lines.add("해군 귀항/거점 배정: ${result.counts["strategic_naval_assigned"] ?: 0}기 (계획 갱신 누적)")
+        lines.add("해군 주둔 유지: ${result.counts["strategic_naval_holding"] ?: 0}회 / " +
+            "귀항·재배치 이동: ${result.counts["strategic_naval_moves"] ?: 0}회 / " +
+            "항구 경로 실패: ${result.counts["strategic_naval_port_failures"] ?: 0}회")
         // GS_AI_PATH_PRECHECK_V2: counts are per checked military AI decision,
         // not a separate duration. Do not sum with pathfinding time.
         lines.add("근접 적 없음: 이동범위 경로 탐색 ${result.counts["unit_advance_paths_skipped"] ?: 0}회 생략")

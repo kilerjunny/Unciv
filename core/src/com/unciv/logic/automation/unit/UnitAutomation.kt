@@ -109,10 +109,15 @@ object UnitAutomation {
         // Focus all units without a specific target on the enemy city closest to one of our cities
         if (GrandStrategyPerf.measure("unit_city_target") { HeadTowardsEnemyCityAutomation.tryHeadTowardsEnemyCity(unit) }) return
 
+        // GS_STRATEGIC_DEPLOYMENT_AI_V2: peaceful ships return to their assigned
+        // naval bases before optional barbarian-camp roaming. Combat is above.
+        if (unit.civ.isAI() && !unit.civ.isAtWar() && unit.baseUnit.isWaterUnit &&
+            GrandStrategyPerf.measure("unit_strategic_deployment") { StrategicDeploymentAI.tryDeploy(unit) }) return
+
         if (tryHeadTowardsEncampment(unit)) return
 
-        // GS_STRATEGIC_DEPLOYMENT_AI_V1: after combat, before default garrison/exploration.
-        if (unit.civ.isAI() && !unit.civ.isAtWar() &&
+        // Land troops retain the v1 garrison decision priority.
+        if (unit.civ.isAI() && !unit.civ.isAtWar() && !unit.baseUnit.isWaterUnit &&
             GrandStrategyPerf.measure("unit_strategic_deployment") { StrategicDeploymentAI.tryDeploy(unit) }) return
 
         if (tryGarrisoningLandUnit(unit)) return
