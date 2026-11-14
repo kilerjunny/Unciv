@@ -181,6 +181,10 @@ object GrandStrategyPerf {
         lines.add("해군 주둔 유지: ${result.counts["strategic_naval_holding"] ?: 0}회 / " +
             "귀항·재배치 이동: ${result.counts["strategic_naval_moves"] ?: 0}회 / " +
             "항구 경로 실패: ${result.counts["strategic_naval_port_failures"] ?: 0}회")
+        // GS_STRATEGIC_DEPLOYMENT_LAND_V2: these are diagnostic counts, not extra times.
+        lines.add("육군 불필요 승선 차단: ${result.counts["strategic_land_embark_blocked"] ?: 0}회 / " +
+            "기존 승선 지상군 귀환 이동: ${result.counts["strategic_land_sea_return_moves"] ?: 0}회 / " +
+            "귀환 경로 실패: ${result.counts["strategic_land_sea_return_failures"] ?: 0}회")
         // GS_AI_PATH_PRECHECK_V2: counts are per checked military AI decision,
         // not a separate duration. Do not sum with pathfinding time.
         lines.add("근접 적 없음: 이동범위 경로 탐색 ${result.counts["unit_advance_paths_skipped"] ?: 0}회 생략")

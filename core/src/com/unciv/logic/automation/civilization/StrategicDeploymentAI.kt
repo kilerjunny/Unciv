@@ -2,6 +2,7 @@ package com.unciv.logic.automation.civilization
 
 import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
+import com.unciv.logic.civilization.diplomacy.RelationshipLevel
 import com.unciv.logic.market.MilitaryMarket
 import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.mapunit.movement.UnitMovement
@@ -43,12 +44,33 @@ object StrategicDeploymentAI {
     ) {
         // Old land path behavior: don't repeat expensive checks during a plan.
         val unreachableLand = HashSet<Int>()
+        // Never hand an embarked defensive assignment back to stock AI next turn.
+        val blockedLandEmbark = HashSet<Int>()
         // Navy: a failed port is skipped, but another port may be tried next turn.
         val failedNavalPorts = HashMap<Int, MutableSet<String>>()
     }
 
     // Weak keys + values containing IDs only avoid retaining discarded games.
     private val plans = WeakHashMap<Civilization, Plan>()
+
+    // GS_STRATEGIC_DEPLOYMENT_LAND_V2: a coast across a strait is not a land border.
+    // A shared land continent is required; relationship adjusts the guard priority.
+    private fun landBorderRisk(civ: Civilization, center: Tile, continent: Int): Int {
+        if (!center.isLand || continent < 0) return 0
+        val neighbors = center.getTilesInDistance(5)
+            .filter { it.isLand && it.getContinent() == continent }
+            .mapNotNull { it.getOwner() }
+            .filter { it != civ && it.isMajorCiv() }
+            .distinct()
+        return neighbors.map { other ->
+            when (civ.getDiplomacyManager(other)?.relationshipIgnoreAfraid()) {
+                RelationshipLevel.Unforgivable, RelationshipLevel.Enemy -> 2
+                RelationshipLevel.Favorable, RelationshipLevel.Friend,
+                RelationshipLevel.Ally -> 0
+                else -> 1
+            }
+        }.maxOrNull() ?: 0
+    }
 
     private fun eligible(unit: MapUnit): Boolean =
         unit.isMilitary() && !unit.isDestroyed && unit.id >= 0 &&
@@ -73,17 +95,25 @@ object StrategicDeploymentAI {
             val continent = center.getContinent()
             val overseas = capitalContinent >= 0 && continent >= 0 &&
                 continent != capitalContinent
-            val border = center.getTilesInDistance(5).any { tile ->
+            val borderRisk = landBorderRisk(civ, center, continent)
+            // Keep sea-facing harbor defence even when there is no LAND border.
+            val seaBorder = city.isNaval() && center.getTilesInDistance(5).any { tile ->
                 val owner = tile.getOwner()
                 owner != null && owner != civ && owner.isMajorCiv()
             }
             val priority = (if (city.isCapital()) 30 else 0) +
-                (if (border) 35 else 0) +
+                (if (borderRisk == 2) 35 else if (borderRisk == 1) 15 else 0) +
                 (if (overseas) 25 else 0) +
-                (if (city.isNaval()) 10 else 0)
-            val landSlots = if (border) 3 else if (city.isCapital() || overseas) 2 else 1
+                (if (city.isNaval()) 10 else 0) +
+                (if (seaBorder && borderRisk == 0) 10 else 0)
+            val landSlots = when {
+                borderRisk == 2 -> 3
+                borderRisk == 1 -> 2
+                city.isCapital() || overseas -> 2
+                else -> 1
+            }
             val navalSlots = if (city.isNaval()) {
-                if (border || overseas) 2 else 1
+                if (seaBorder || overseas) 2 else 1
             } else 0
             Goal(city, priority, landSlots, navalSlots, continent)
         }.sortedWith(compareByDescending<Goal> { it.priority }.thenBy { it.city.id })
@@ -98,11 +128,14 @@ object StrategicDeploymentAI {
         fun assignTo(goal: Goal, pool: MutableList<MapUnit>, slots: Int) {
             repeat(slots) {
                 val center = goal.city.getCenterTile()
-                val closest = pool.minWithOrNull(compareBy<MapUnit> { unit ->
-                    val otherContinent = !unit.baseUnit.isWaterUnit &&
-                        goal.continent >= 0 && unit.currentTile.getContinent() >= 0 &&
-                        unit.currentTile.getContinent() != goal.continent
-                    unit.currentTile.aerialDistanceTo(center) + if (otherContinent) 15 else 0
+                // Land troops defend their existing landmass. No peacetime
+                // cross-sea reinforcement orders solely for a border garrison.
+                val closest = pool.asSequence().filter { unit ->
+                    unit.baseUnit.isWaterUnit || (goal.continent >= 0 &&
+                        unit.currentTile.isLand &&
+                        unit.currentTile.getContinent() == goal.continent)
+                }.minWithOrNull(compareBy<MapUnit> { unit ->
+                    unit.currentTile.aerialDistanceTo(center)
                 }.thenBy { it.id }) ?: return@repeat
                 assigned[closest.id] = goal.city.id
                 pool.remove(closest)
@@ -148,6 +181,43 @@ object StrategicDeploymentAI {
         return plan
     }
 
+    /**
+     * An existing embarked AI land unit is NOT a fresh overseas deployment.
+     * In peace, first try to disembark on reachable owned land. A failed
+     * check falls back to stock AI and is throttled until plan refresh.
+     */
+    private fun tryDisembarkToOwnedLand(unit: MapUnit, plan: Plan): Boolean {
+        if (unit.id in plan.unreachableLand) return false
+        if (!unit.hasMovement()) return true
+        val civ = unit.civ
+        val origin = unit.currentTile
+        val coast = civ.cities.asSequence()
+            .flatMap { it.getCenterTile().getTilesInDistance(2) }
+            .filter { it.isLand && it.getOwner() == civ && !it.isImpassible() &&
+                (it.militaryUnit == null || it.militaryUnit == unit) }
+            .distinct().sortedBy { it.aerialDistanceTo(origin) }
+        var checks = 0
+        for (target in coast) {
+            if (!unit.movement.canMoveTo(target)) continue
+            if (checks >= MAX_LAND_REACH_CHECKS) break
+            checks++
+            if (!unit.movement.canReach(target)) continue
+            try {
+                val before = unit.currentTile
+                unit.movement.headTowards(target)
+                if (unit.currentTile != before) {
+                    GrandStrategyPerf.addCount("strategic_land_sea_return_moves", 1)
+                    return true
+                }
+            } catch (_: UnitMovement.UnreachableDestinationException) {
+                // An occupied coastal tile can invalidate a checked route.
+            }
+        }
+        plan.unreachableLand.add(unit.id)
+        GrandStrategyPerf.addCount("strategic_land_sea_return_failures", 1)
+        return false
+    }
+
     /** Return true when a defensive assignment handled the unit's decision. */
     fun tryDeploy(unit: MapUnit): Boolean {
         val civ = unit.civ
@@ -155,6 +225,9 @@ object StrategicDeploymentAI {
             !eligible(unit) || civ.cities.isEmpty()) return false
         val plan = planFor(civ)
         val naval = unit.baseUnit.isWaterUnit
+        // GS_STRATEGIC_DEPLOYMENT_LAND_V2: recover existing embarked land troops.
+        if (!naval && unit.isEmbarked())
+            return tryDisembarkToOwnedLand(unit, plan)
         val destinationCityId = if (naval) {
             val failed = plan.failedNavalPorts.getOrPut(unit.id) { HashSet() }
             plan.navalPortOrder[unit.id]?.firstOrNull { it !in failed }
@@ -181,7 +254,8 @@ object StrategicDeploymentAI {
         // A ship that has used its movement will retry next turn. Don't send
         // it into the stock wandering AI just because its movement is zero.
         if (!unit.hasMovement()) return naval
-        if (!naval && unit.id in plan.unreachableLand) return false
+        if (!naval && unit.id in plan.unreachableLand)
+            return unit.id in plan.blockedLandEmbark
 
         val destinations = center.getTilesInDistance(radius)
             .filter { tile ->
@@ -196,6 +270,7 @@ object StrategicDeploymentAI {
             .toList()
 
         var checks = 0
+        var blockedEmbark = false
         val maxChecks = if (naval) MAX_NAVAL_REACH_CHECKS else MAX_LAND_REACH_CHECKS
         for (tile in destinations) {
             if (tile == origin || !unit.movement.canMoveTo(tile)) continue
@@ -203,6 +278,14 @@ object StrategicDeploymentAI {
             checks++
             if (!unit.movement.canReach(tile)) continue
             try {
+                // Even on one continent the shortest route may cut across water.
+                // Guard moves must never issue a new embark order in peace.
+                if (!naval && origin.isLand &&
+                    unit.movement.getTileToMoveToThisTurn(tile).isWater) {
+                    blockedEmbark = true
+                    GrandStrategyPerf.addCount("strategic_land_embark_blocked", 1)
+                    continue
+                }
                 val before = unit.currentTile
                 unit.movement.headTowards(tile)
                 if (unit.currentTile != before) {
@@ -223,7 +306,10 @@ object StrategicDeploymentAI {
             return false // Keep stock AI fallback if no base was reachable.
         }
         plan.unreachableLand.add(unit.id)
+        if (blockedEmbark) plan.blockedLandEmbark.add(unit.id)
         GrandStrategyPerf.addCount("strategic_deploy_unreachable", 1)
-        return false
+        // Holding a defensive position is better than boarding a ship solely
+        // because the shortest route cuts across a strait.
+        return blockedEmbark
     }
 }

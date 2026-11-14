@@ -114,11 +114,12 @@ object UnitAutomation {
         if (unit.civ.isAI() && !unit.civ.isAtWar() && unit.baseUnit.isWaterUnit &&
             GrandStrategyPerf.measure("unit_strategic_deployment") { StrategicDeploymentAI.tryDeploy(unit) }) return
 
-        if (tryHeadTowardsEncampment(unit)) return
-
-        // Land troops retain the v1 garrison decision priority.
+        // GS_STRATEGIC_DEPLOYMENT_LAND_V2: peacetime land defence and
+        // existing embarked-unit recovery precede optional camp roaming.
         if (unit.civ.isAI() && !unit.civ.isAtWar() && !unit.baseUnit.isWaterUnit &&
             GrandStrategyPerf.measure("unit_strategic_deployment") { StrategicDeploymentAI.tryDeploy(unit) }) return
+
+        if (tryHeadTowardsEncampment(unit)) return
 
         if (tryGarrisoningLandUnit(unit)) return
 
