@@ -22,7 +22,8 @@ import kotlin.math.roundToInt
 object RegionStartFinder {
 
     /** Attempts to find a good start close to the center of [region]. Calls setRegionStart with the position*/
-    internal fun findStart(region: Region, tileData: TileDataMap) {
+    internal fun findStart(region: Region, tileData: TileDataMap, preferCoast: Boolean = false) {
+        if (preferCoast && tryFindMaritimeCoast(region, tileData)) return
         val fallbackTiles = HashSet<Tile>()
         // Priority: 1. Adjacent to river, 2. Adjacent to coast or fresh water, 3. Other.
 
@@ -40,6 +41,30 @@ object RegionStartFinder {
         if (findEdgePosition(outerDonut, region, tileData, fallbackTiles)) return
         
         findFallbackPosition(fallbackTiles, tileData, region)
+    }
+
+    /**
+     * GS_MARITIME_WORLD_V1: prefer viable coastal capitals in the maritime
+     * preset, but retain original fertility, spacing and inland fallback.
+     * Called only during map creation, and never for other map types.
+     */
+    private fun tryFindMaritimeCoast(region: Region, tileData: TileDataMap): Boolean {
+        var best: Tile? = null
+        var bestScore = Int.MIN_VALUE
+        for (tile in region.tileMap.getTilesInRectangle(region.rect)) {
+            if (!tile.isLand || tile.isImpassible() || !tile.isAdjacentToCoast()) continue
+            if (region.continentID != -1 && region.continentID != tile.getContinent()) continue
+            val data = tileData[tile] ?: continue
+            evaluateTileForStart(tile, tileData)
+            if (!data.isGoodStart || data.closeStartPenalty > 0) continue
+            if (data.startScore > bestScore) {
+                best = tile
+                bestScore = data.startScore
+            }
+        }
+        val chosen = best ?: return false
+        setRegionStart(region, chosen.position, tileData)
+        return true
     }
 
     private fun findGoodPosition(centerTiles: Set<Tile>, region: Region, tileData: TileDataMap, fallbackTiles: HashSet<Tile>): Boolean {

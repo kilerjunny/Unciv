@@ -31,6 +31,8 @@ object MapType {
     const val perlin = "Perlin"
     const val fractal = "Fractal"
     const val continentAndIslands = "Continent and Islands"
+    // GS_MARITIME_WORLD_V1: opt-in naval-focused generator; existing maps unchanged.
+    const val maritimeContinents = "Maritime Continents"
     const val archipelago = "Archipelago"
     const val twoContinents = "Two Continents"
     const val threeContinents = "Three Continents"
@@ -47,6 +49,7 @@ object MapType {
         perlin,
         fractal,
         continentAndIslands,
+        maritimeContinents,
         archipelago,
         twoContinents,
         threeContinents,

@@ -4,6 +4,7 @@ import com.badlogic.gdx.math.Rectangle
 import com.unciv.Constants
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.map.MapShape
+import com.unciv.logic.map.MapType
 import com.unciv.logic.map.TileMap
 import com.unciv.logic.map.mapgenerator.mapregions.MapRegions.BiasTypes.PositiveFallback
 import com.unciv.logic.map.mapgenerator.resourceplacement.LuxuryResourcePlacementLogic
@@ -248,7 +249,17 @@ class MapRegions (val ruleset: Ruleset) {
 
         // Sort regions by fertility so the worse regions get to pick first
         val sortedRegions = regions.sortedBy { it.totalFertility }
-        for (region in sortedRegions) RegionStartFinder.findStart(region, tileData)
+        // GS_MARITIME_WORLD_V1: aim for >=85% ocean-coastal capitals, without
+        // forcing invalid start sites. We count successful coastal starts rather
+        // than reserving a fixed number of regions that might lack coast.
+        val maritime = tileMap.mapParameters.type == MapType.maritimeContinents
+        val desiredCoastalStarts = if (maritime) (sortedRegions.size * 85 + 99) / 100 else 0
+        var coastalStarts = 0
+        for (region in sortedRegions) {
+            RegionStartFinder.findStart(region, tileData,
+                preferCoast = maritime && coastalStarts < desiredCoastalStarts)
+            if (maritime && tileMap[region.startPosition!!].isAdjacentToCoast()) coastalStarts++
+        }
         for (region in regions) {
             StartNormalizer.normalizeStart(tileMap[region.startPosition!!], tileMap, tileData, ruleset, isMinorCiv = false)
         }
