@@ -53,6 +53,7 @@ class MapLandmassGenerator(
             MapType.pangaea -> createPangaea()
             MapType.innerSea -> createInnerSea()
             MapType.continentAndIslands -> createContinentAndIslands()
+            MapType.maritimeContinents -> createMaritimeContinents()
             MapType.twoContinents -> createTwoContinents()
             MapType.threeContinents -> createThreeContinents()
             MapType.fourCorners -> createFourCorners()
@@ -295,6 +296,222 @@ class MapLandmassGenerator(
             var elevation = randomness.getPerlinNoise(tile, elevationSeed)
             elevation = (elevation + getContinentAndIslandsTransform(tile, isNorth, isLatitude)) / 2.0
             spawnLandOrWater(tile, elevation)
+        }
+    }
+
+    /**
+     * GS_MARITIME_WORLD_V3_OPEN_OCEANS
+     * Keep the v2 Small Continents field and its best-of-2/3 candidate choice.
+     * Then broaden one or two existing seas using smooth depressions in the
+     * elevation field, re-quantizing to ~65% water (at default water level).
+     * All work happens once at map creation. No turn-time AI computation.
+     */
+    private fun createMaritimeContinents() {
+        val tiles = tileMap.values.toList()
+        if (tiles.isEmpty()) return
+        val waterRatio = (0.65 + tileMap.mapParameters.waterThreshold.toDouble()).coerceIn(0.55, 0.75)
+        val targetWater = (tiles.size * waterRatio).toInt().coerceIn(0, tiles.size)
+
+        val samples = if (tiles.size >= 18000) 2 else 3
+        var bestMask: BooleanArray? = null
+        var bestElevations: DoubleArray? = null
+        var bestScore = Int.MAX_VALUE
+        repeat(samples) {
+            val elevationSeed = randomness.RNG.nextInt().toDouble()
+            val elevationByIndex = DoubleArray(tiles.size)
+            val byElevation = tiles.map { tile ->
+                val elevation = getRidgedPerlinNoise(tile, elevationSeed, scale = 22.0) +
+                    getOceanEdgesTransform(tile)
+                elevationByIndex[tile.zeroBasedIndex] = elevation
+                tile.zeroBasedIndex to elevation
+            }.sortedWith(compareBy<Pair<Int, Double>> { it.second }.thenBy { it.first })
+
+            val land = BooleanArray(tiles.size)
+            for (index in targetWater until byElevation.size)
+                land[byElevation[index].first] = true
+            val score = maritimeLandmassScore(tiles, land)
+            if (score < bestScore) {
+                bestScore = score
+                bestMask = land
+                bestElevations = elevationByIndex
+            }
+        }
+
+        val baseLand = bestMask ?: return
+        val originalElevation = bestElevations ?: return
+        val radius = (kotlin.math.sqrt(tiles.size.toDouble()) * 0.18).toInt().coerceIn(6, 24)
+        val basins = chooseMaritimeOceanBasins(tiles, baseLand, radius)
+        val land = widenMaritimeOceanBasins(tiles, baseLand, originalElevation,
+            basins, radius, targetWater)
+        for (tile in tiles)
+            tile.baseTerrain = if (land[tile.zeroBasedIndex]) landTerrainName else waterTerrainName
+
+        // No extra island groups in the central deep-water region. Existing
+        // coastal island chains and optional narrow straits are kept intact.
+        val protectedOceanCore = HashSet<Tile>()
+        val coreRadius = (radius / 2).coerceAtLeast(2)
+        for (center in basins) for (tile in center.getTilesInDistance(coreRadius))
+            if (!land[tile.zeroBasedIndex]) protectedOceanCore.add(tile)
+        val newIslands = addMaritimeIslandChains(protectedOceanCore)
+        carveMaritimeStraits(newIslands)
+    }
+
+    /**
+     * Select 1-2 WATER centers from v2's candidate layout. Prefer seas that
+     * already contain considerable open water, instead of drilling a perfect
+     * circle through an intact continent. Reject sites too close to map edges
+     * and keep the two basins well separated.
+     *
+     * The number of samples is fixed, so large maps do not cause quadratic
+     * placement searches or a new per-turn performance cost.
+     */
+    private fun chooseMaritimeOceanBasins(
+        tiles: List<Tile>, land: BooleanArray, radius: Int
+    ): List<Tile> {
+        if (tiles.size < 1400) return emptyList()
+        val count = if (tiles.size >= 6500) 2 else 1
+        val expectedDisk = 1 + 3 * radius * (radius + 1)
+        val possibilities = tiles.filter { !land[it.zeroBasedIndex] }
+            .shuffled(randomness.RNG).take(100)
+        val centers = ArrayList<Tile>(count)
+        repeat(count) {
+            var best: Tile? = null
+            var bestScore = Int.MAX_VALUE
+            for (candidate in possibilities) {
+                if (centers.any { it.aerialDistanceTo(candidate) < radius * 2 }) continue
+                val disk = candidate.getTilesInDistance(radius).toList()
+                // Edge basins look like empty margins, not traversable oceans.
+                if (disk.size * 100 < expectedDisk * 72) continue
+                val waterCount = disk.count { !land[it.zeroBasedIndex] }
+                val waterPercent = waterCount * 100 / disk.size
+                if (waterPercent < 52) continue
+                // Roughly 78%-wet basins can be broadened naturally without
+                // eating up large amounts of existing continental interiors.
+                val score = kotlin.math.abs(waterPercent - 78) * 10 - disk.size / 10
+                if (score < bestScore) {
+                    best = candidate
+                    bestScore = score
+                }
+            }
+            if (best != null) centers.add(best)
+        }
+        return centers
+    }
+
+    /**
+     * A smooth basin with the original ridged terrain underneath keeps the
+     * coast irregular. Re-quantize after applying the basin to preserve the
+     * target water fraction instead of just flooding more of the map.
+     */
+    private fun widenMaritimeOceanBasins(
+        tiles: List<Tile>, land: BooleanArray, elevations: DoubleArray,
+        basins: List<Tile>, radius: Int, targetWater: Int
+    ): BooleanArray {
+        if (basins.isEmpty()) return land
+        val adjusted = elevations.copyOf()
+        for (tile in tiles) for (basin in basins) {
+            val distance = tile.aerialDistanceTo(basin)
+            if (distance >= radius) continue
+            val scaled = distance.toDouble() / radius
+            val taper = 1.0 - scaled * scaled
+            adjusted[tile.zeroBasedIndex] -= 0.45 * taper * taper
+        }
+        val sorted = tiles.map { it.zeroBasedIndex }
+            .sortedWith(compareBy<Int> { adjusted[it] }.thenBy { it })
+        val result = BooleanArray(land.size)
+        for (index in targetWater until sorted.size) result[sorted[index]] = true
+        // Keep v2's main continental distribution intact: at most 5% of the
+        // map may switch land/water because of the ocean widening pass.
+        val switches = result.indices.count { result[it] != land[it] }
+        if (switches * 20 > tiles.size) return land
+        return result
+    }
+
+    /**
+     * Land component score from v2, unchanged: prefer several viable medium
+     * landmasses over a single giant or countless one-tile islands.
+     */
+    private fun maritimeLandmassScore(tiles: List<Tile>, land: BooleanArray): Int {
+        val visited = BooleanArray(land.size)
+        val componentSizes = ArrayList<Int>()
+        val queue = ArrayDeque<Tile>()
+        for (tile in tiles) {
+            val index = tile.zeroBasedIndex
+            if (!land[index] || visited[index]) continue
+            visited[index] = true
+            queue.add(tile)
+            var size = 0
+            while (queue.isNotEmpty()) {
+                val current = queue.removeFirst()
+                size++
+                for (neighbor in current.neighbors) {
+                    val neighborIndex = neighbor.zeroBasedIndex
+                    if (!land[neighborIndex] || visited[neighborIndex]) continue
+                    visited[neighborIndex] = true
+                    queue.add(neighbor)
+                }
+            }
+            componentSizes.add(size)
+        }
+        val totalLand = land.count { it }.coerceAtLeast(1)
+        val largestPercent = ((componentSizes.maxOrNull() ?: 0) * 100) / totalLand
+        val mediumThreshold = (totalLand / 70).coerceAtLeast(8)
+        val mediumCount = componentSizes.count { it >= mediumThreshold }
+
+        val giantPenalty = (largestPercent - 28).coerceAtLeast(0) * 12
+        val tooFewPenalty = (4 - mediumCount).coerceAtLeast(0) * 35
+        val tooManyPenalty = (mediumCount - 18).coerceAtLeast(0) * 12
+        return giantPenalty + tooFewPenalty + tooManyPenalty + kotlin.math.abs(largestPercent - 19)
+    }
+
+    /** Bounded 4-tile island groups, generally within five tiles of existing land. */
+    private fun addMaritimeIslandChains(protectedOceanCore: Set<Tile>): Set<Tile> {
+        val createdIslands = HashSet<Tile>()
+        val budget = (tileMap.values.size / 320).coerceAtMost(160)
+        if (budget < 4) return createdIslands
+
+        val candidates = tileMap.values.filter { it.baseTerrain == waterTerrainName }
+            .shuffled(randomness.RNG)
+        for (center in candidates) {
+            if (createdIslands.size + 4 > budget) break
+            if (center.baseTerrain != waterTerrainName) continue
+            if (center in protectedOceanCore) continue
+            val neighbors = center.neighbors.toList()
+            if (neighbors.any { it in protectedOceanCore }) continue
+            if (neighbors.size != 6 || neighbors.any { it.baseTerrain != waterTerrainName }) continue
+            if (center.getTilesInDistance(5).none { it.baseTerrain == landTerrainName }) continue
+
+            // Compact groups give a better settlement opportunity than isolated
+            // single-tile islands, without blocking a full ocean corridor.
+            val group = listOf(center) + neighbors.shuffled(randomness.RNG).take(3)
+            for (tile in group) {
+                tile.baseTerrain = landTerrainName
+                createdIslands.add(tile)
+            }
+        }
+        return createdIslands
+    }
+
+    /** Open a few one-tile land bridges into potential straits or inlets. */
+    private fun carveMaritimeStraits(protectedIslands: Set<Tile>) {
+        val maxCuts = (tileMap.values.size / 500).coerceAtMost(90)
+        if (maxCuts <= 0) return
+        val cuts = HashSet<Tile>()
+        val candidates = tileMap.values.filter { it.baseTerrain == landTerrainName && it !in protectedIslands }
+            .shuffled(randomness.RNG)
+        for (tile in candidates) {
+            if (cuts.size >= maxCuts) break
+            if (tile.neighbors.count() != 6 || tile.neighbors.any { it in cuts }) continue
+            val waterSides = tile.neighbors.filter { it.baseTerrain == waterTerrainName }.toList()
+            if (waterSides.size !in 2..4) continue
+            // Water on two non-adjacent sides makes this a narrow neck, rather
+            // than converting long segments of ordinary coastline into water.
+            val spansNeck = waterSides.any { first ->
+                waterSides.any { second -> first != second && first.aerialDistanceTo(second) >= 2 }
+            }
+            if (!spansNeck) continue
+            tile.baseTerrain = waterTerrainName
+            cuts.add(tile)
         }
     }
 
