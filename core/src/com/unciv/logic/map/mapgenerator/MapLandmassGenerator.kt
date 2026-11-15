@@ -300,14 +300,11 @@ class MapLandmassGenerator(
     }
 
     /**
-     * GS_MARITIME_WORLD_V2_SMALL_CONTINENTS
-     * Draw geography from the same ridged Perlin landmass field as the stock
-     * Small Continents map, NOT the one-sided Continent and Islands transform.
-     * Try a bounded number of seeds and favor a spread of medium continents.
-     * This only runs at map generation, never during turns.
-     *
-     * Keep the v1 water-level behavior (65% target at default settings) and
-     * the same bounded islands/straits and 85%-target coast-start selection.
+     * GS_MARITIME_WORLD_V3_OPEN_OCEANS
+     * Keep the v2 Small Continents field and its best-of-2/3 candidate choice.
+     * Then broaden one or two existing seas using smooth depressions in the
+     * elevation field, re-quantizing to ~65% water (at default water level).
+     * All work happens once at map creation. No turn-time AI computation.
      */
     private fun createMaritimeContinents() {
         val tiles = tileMap.values.toList()
@@ -315,48 +312,124 @@ class MapLandmassGenerator(
         val waterRatio = (0.65 + tileMap.mapParameters.waterThreshold.toDouble()).coerceIn(0.55, 0.75)
         val targetWater = (tiles.size * waterRatio).toInt().coerceIn(0, tiles.size)
 
-        // Use one seed per candidate, so the selected layout is deterministic
-        // for the map seed and the map's shape/size parameters.
         val samples = if (tiles.size >= 18000) 2 else 3
         var bestMask: BooleanArray? = null
+        var bestElevations: DoubleArray? = null
         var bestScore = Int.MAX_VALUE
         repeat(samples) {
             val elevationSeed = randomness.RNG.nextInt().toDouble()
+            val elevationByIndex = DoubleArray(tiles.size)
             val byElevation = tiles.map { tile ->
-                // Exactly the stock Small Continents terrain field. Rank it
-                // instead of using the default lowering-water-level retry:
-                // this preserves a consistent, predictable 65% sea share.
                 val elevation = getRidgedPerlinNoise(tile, elevationSeed, scale = 22.0) +
                     getOceanEdgesTransform(tile)
+                elevationByIndex[tile.zeroBasedIndex] = elevation
                 tile.zeroBasedIndex to elevation
             }.sortedWith(compareBy<Pair<Int, Double>> { it.second }.thenBy { it.first })
 
             val land = BooleanArray(tiles.size)
             for (index in targetWater until byElevation.size)
                 land[byElevation[index].first] = true
-
             val score = maritimeLandmassScore(tiles, land)
             if (score < bestScore) {
                 bestScore = score
                 bestMask = land
+                bestElevations = elevationByIndex
             }
         }
 
-        val land = bestMask ?: return
+        val baseLand = bestMask ?: return
+        val originalElevation = bestElevations ?: return
+        val radius = (kotlin.math.sqrt(tiles.size.toDouble()) * 0.18).toInt().coerceIn(6, 24)
+        val basins = chooseMaritimeOceanBasins(tiles, baseLand, radius)
+        val land = widenMaritimeOceanBasins(tiles, baseLand, originalElevation,
+            basins, radius, targetWater)
         for (tile in tiles)
             tile.baseTerrain = if (land[tile.zeroBasedIndex]) landTerrainName else waterTerrainName
 
-        // Keep the proven v1 bounded edits, including protection for new
-        // island chains. These never rerun during turns or on loaded saves.
-        val newIslands = addMaritimeIslandChains()
+        // No extra island groups in the central deep-water region. Existing
+        // coastal island chains and optional narrow straits are kept intact.
+        val protectedOceanCore = HashSet<Tile>()
+        val coreRadius = (radius / 2).coerceAtLeast(2)
+        for (center in basins) for (tile in center.getTilesInDistance(coreRadius))
+            if (!land[tile.zeroBasedIndex]) protectedOceanCore.add(tile)
+        val newIslands = addMaritimeIslandChains(protectedOceanCore)
         carveMaritimeStraits(newIslands)
     }
 
     /**
-     * Score connected landmasses without setting map transients. A single
-     * enormous continent and a map made only of tiny isolated specks are both
-     * less desirable than several viable medium-sized continents.
-     * Bounded O(tiles + edges) flood-fill, run only on the seed candidates.
+     * Select 1-2 WATER centers from v2's candidate layout. Prefer seas that
+     * already contain considerable open water, instead of drilling a perfect
+     * circle through an intact continent. Reject sites too close to map edges
+     * and keep the two basins well separated.
+     *
+     * The number of samples is fixed, so large maps do not cause quadratic
+     * placement searches or a new per-turn performance cost.
+     */
+    private fun chooseMaritimeOceanBasins(
+        tiles: List<Tile>, land: BooleanArray, radius: Int
+    ): List<Tile> {
+        if (tiles.size < 1400) return emptyList()
+        val count = if (tiles.size >= 6500) 2 else 1
+        val expectedDisk = 1 + 3 * radius * (radius + 1)
+        val possibilities = tiles.filter { !land[it.zeroBasedIndex] }
+            .shuffled(randomness.RNG).take(100)
+        val centers = ArrayList<Tile>(count)
+        repeat(count) {
+            var best: Tile? = null
+            var bestScore = Int.MAX_VALUE
+            for (candidate in possibilities) {
+                if (centers.any { it.aerialDistanceTo(candidate) < radius * 2 }) continue
+                val disk = candidate.getTilesInDistance(radius).toList()
+                // Edge basins look like empty margins, not traversable oceans.
+                if (disk.size * 100 < expectedDisk * 72) continue
+                val waterCount = disk.count { !land[it.zeroBasedIndex] }
+                val waterPercent = waterCount * 100 / disk.size
+                if (waterPercent < 52) continue
+                // Roughly 78%-wet basins can be broadened naturally without
+                // eating up large amounts of existing continental interiors.
+                val score = kotlin.math.abs(waterPercent - 78) * 10 - disk.size / 10
+                if (score < bestScore) {
+                    best = candidate
+                    bestScore = score
+                }
+            }
+            if (best != null) centers.add(best)
+        }
+        return centers
+    }
+
+    /**
+     * A smooth basin with the original ridged terrain underneath keeps the
+     * coast irregular. Re-quantize after applying the basin to preserve the
+     * target water fraction instead of just flooding more of the map.
+     */
+    private fun widenMaritimeOceanBasins(
+        tiles: List<Tile>, land: BooleanArray, elevations: DoubleArray,
+        basins: List<Tile>, radius: Int, targetWater: Int
+    ): BooleanArray {
+        if (basins.isEmpty()) return land
+        val adjusted = elevations.copyOf()
+        for (tile in tiles) for (basin in basins) {
+            val distance = tile.aerialDistanceTo(basin)
+            if (distance >= radius) continue
+            val scaled = distance.toDouble() / radius
+            val taper = 1.0 - scaled * scaled
+            adjusted[tile.zeroBasedIndex] -= 0.45 * taper * taper
+        }
+        val sorted = tiles.map { it.zeroBasedIndex }
+            .sortedWith(compareBy<Int> { adjusted[it] }.thenBy { it })
+        val result = BooleanArray(land.size)
+        for (index in targetWater until sorted.size) result[sorted[index]] = true
+        // Keep v2's main continental distribution intact: at most 5% of the
+        // map may switch land/water because of the ocean widening pass.
+        val switches = result.indices.count { result[it] != land[it] }
+        if (switches * 20 > tiles.size) return land
+        return result
+    }
+
+    /**
+     * Land component score from v2, unchanged: prefer several viable medium
+     * landmasses over a single giant or countless one-tile islands.
      */
     private fun maritimeLandmassScore(tiles: List<Tile>, land: BooleanArray): Int {
         val visited = BooleanArray(land.size)
@@ -392,7 +465,7 @@ class MapLandmassGenerator(
     }
 
     /** Bounded 4-tile island groups, generally within five tiles of existing land. */
-    private fun addMaritimeIslandChains(): Set<Tile> {
+    private fun addMaritimeIslandChains(protectedOceanCore: Set<Tile>): Set<Tile> {
         val createdIslands = HashSet<Tile>()
         val budget = (tileMap.values.size / 320).coerceAtMost(160)
         if (budget < 4) return createdIslands
@@ -402,7 +475,9 @@ class MapLandmassGenerator(
         for (center in candidates) {
             if (createdIslands.size + 4 > budget) break
             if (center.baseTerrain != waterTerrainName) continue
+            if (center in protectedOceanCore) continue
             val neighbors = center.neighbors.toList()
+            if (neighbors.any { it in protectedOceanCore }) continue
             if (neighbors.size != 6 || neighbors.any { it.baseTerrain != waterTerrainName }) continue
             if (center.getTilesInDistance(5).none { it.baseTerrain == landTerrainName }) continue
 
