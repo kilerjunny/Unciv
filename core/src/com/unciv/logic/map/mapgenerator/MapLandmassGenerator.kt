@@ -300,43 +300,95 @@ class MapLandmassGenerator(
     }
 
     /**
-     * GS_MARITIME_WORLD_V1
-     * Continent-and-islands geography, deterministic 65% water coverage at the
-     * landmass stage, plus bounded small-island and narrow-strait edits.
-     * The original map types and their RNG sequences are not changed.
-     * This runs once when creating a map, NEVER during game turns.
+     * GS_MARITIME_WORLD_V2_SMALL_CONTINENTS
+     * Draw geography from the same ridged Perlin landmass field as the stock
+     * Small Continents map, NOT the one-sided Continent and Islands transform.
+     * Try a bounded number of seeds and favor a spread of medium continents.
+     * This only runs at map generation, never during turns.
+     *
+     * Keep the v1 water-level behavior (65% target at default settings) and
+     * the same bounded islands/straits and 85%-target coast-start selection.
      */
     private fun createMaritimeContinents() {
-        val isNorth = randomness.RNG.nextDouble() < 0.5
-        val isLatitude = if (tileMap.mapParameters.shape == MapShape.hexagonal ||
-            tileMap.mapParameters.shape == MapShape.flatEarth)
-            randomness.RNG.nextDouble() > 0.5
-        else if (tileMap.mapParameters.mapSize.height > tileMap.mapParameters.mapSize.width) true
-        else if (tileMap.mapParameters.mapSize.width > tileMap.mapParameters.mapSize.height) false
-        else randomness.RNG.nextDouble() > 0.5
-
-        val elevationSeed = randomness.RNG.nextInt().toDouble()
-        val detailSeed = randomness.RNG.nextInt().toDouble()
-        val elevations = tileMap.values.map { tile ->
-            val broad = randomness.getPerlinNoise(tile, elevationSeed)
-            val mass = getContinentAndIslandsTransform(tile, isNorth, isLatitude)
-            val detail = getRidgedPerlinNoise(tile, detailSeed, nOctaves = 4, scale = 17.0)
-            val value = broad * 0.46 + mass * 0.48 + detail * 0.06 +
-                getOceanEdgesTransform(tile) * 0.12
-            tile to value
-        }.sortedBy { it.second }
-
-        // Sorting is stable: ties retain TileMap iteration order, and a fixed
-        // seed + parameters yield the same landmass on repeated generation.
-        // The existing advanced Water level slider remains meaningful:
-        // -0.1 means about 55% water, +0.1 about 75% (65% by default).
+        val tiles = tileMap.values.toList()
+        if (tiles.isEmpty()) return
         val waterRatio = (0.65 + tileMap.mapParameters.waterThreshold.toDouble()).coerceIn(0.55, 0.75)
-        val targetWater = (elevations.size * waterRatio).toInt()
-        for ((index, entry) in elevations.withIndex())
-            entry.first.baseTerrain = if (index < targetWater) waterTerrainName else landTerrainName
+        val targetWater = (tiles.size * waterRatio).toInt().coerceIn(0, tiles.size)
 
+        // Use one seed per candidate, so the selected layout is deterministic
+        // for the map seed and the map's shape/size parameters.
+        val samples = if (tiles.size >= 18000) 2 else 3
+        var bestMask: BooleanArray? = null
+        var bestScore = Int.MAX_VALUE
+        repeat(samples) {
+            val elevationSeed = randomness.RNG.nextInt().toDouble()
+            val byElevation = tiles.map { tile ->
+                // Exactly the stock Small Continents terrain field. Rank it
+                // instead of using the default lowering-water-level retry:
+                // this preserves a consistent, predictable 65% sea share.
+                val elevation = getRidgedPerlinNoise(tile, elevationSeed, scale = 22.0) +
+                    getOceanEdgesTransform(tile)
+                tile.zeroBasedIndex to elevation
+            }.sortedWith(compareBy<Pair<Int, Double>> { it.second }.thenBy { it.first })
+
+            val land = BooleanArray(tiles.size)
+            for (index in targetWater until byElevation.size)
+                land[byElevation[index].first] = true
+
+            val score = maritimeLandmassScore(tiles, land)
+            if (score < bestScore) {
+                bestScore = score
+                bestMask = land
+            }
+        }
+
+        val land = bestMask ?: return
+        for (tile in tiles)
+            tile.baseTerrain = if (land[tile.zeroBasedIndex]) landTerrainName else waterTerrainName
+
+        // Keep the proven v1 bounded edits, including protection for new
+        // island chains. These never rerun during turns or on loaded saves.
         val newIslands = addMaritimeIslandChains()
         carveMaritimeStraits(newIslands)
+    }
+
+    /**
+     * Score connected landmasses without setting map transients. A single
+     * enormous continent and a map made only of tiny isolated specks are both
+     * less desirable than several viable medium-sized continents.
+     * Bounded O(tiles + edges) flood-fill, run only on the seed candidates.
+     */
+    private fun maritimeLandmassScore(tiles: List<Tile>, land: BooleanArray): Int {
+        val visited = BooleanArray(land.size)
+        val componentSizes = ArrayList<Int>()
+        val queue = ArrayDeque<Tile>()
+        for (tile in tiles) {
+            val index = tile.zeroBasedIndex
+            if (!land[index] || visited[index]) continue
+            visited[index] = true
+            queue.add(tile)
+            var size = 0
+            while (queue.isNotEmpty()) {
+                val current = queue.removeFirst()
+                size++
+                for (neighbor in current.neighbors) {
+                    val neighborIndex = neighbor.zeroBasedIndex
+                    if (!land[neighborIndex] || visited[neighborIndex]) continue
+                    visited[neighborIndex] = true
+                    queue.add(neighbor)
+                }
+            }
+            componentSizes.add(size)
+        }
+        val totalLand = land.count { it }.coerceAtLeast(1)
+        val largestPercent = ((componentSizes.maxOrNull() ?: 0) * 100) / totalLand
+        val mediumThreshold = (totalLand / 70).coerceAtLeast(8)
+        val mediumCount = componentSizes.count { it >= mediumThreshold }
+
+        val giantPenalty = (largestPercent - 28).coerceAtLeast(0) * 12
+        val tooFewPenalty = (4 - mediumCount).coerceAtLeast(0) * 35
+        val tooManyPenalty = (mediumCount - 18).coerceAtLeast(0) * 12
+        return giantPenalty + tooFewPenalty + tooManyPenalty + kotlin.math.abs(largestPercent - 19)
     }
 
     /** Bounded 4-tile island groups, generally within five tiles of existing land. */
