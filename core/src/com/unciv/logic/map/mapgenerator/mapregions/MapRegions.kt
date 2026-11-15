@@ -264,7 +264,43 @@ class MapRegions (val ruleset: Ruleset) {
             StartNormalizer.normalizeStart(tileMap[region.startPosition!!], tileMap, tileData, ruleset, isMinorCiv = false)
         }
 
-        val civBiases = civilizations.associateWith {
+        // GS_ENGLAND_ISLAND_START_PC_V1:
+        // On Maritime Continents, give England first pick of a viable island
+        // starting region rather than simply an arbitrary coastal start.
+        // A smaller connected landmass is preferred over a one-tile island,
+        // and no custom choice is made if no suitable region exists.
+        val unpickedRegions = regions.toMutableList()
+        var islandAssignedEngland: Civilization? = null
+        if (maritime && !gameParameters.noStartBias) {
+            val england = civilizations.firstOrNull { it.civName == "England" }
+            if (england != null) {
+                val largestLandmass = tileMap.continentSizes.values.maxOrNull() ?: 0
+                val minimumIslandSize = (tileMap.values.size / 600).coerceIn(24, 65)
+                val maximumIslandSize = largestLandmass * 60 / 100
+                val eligibleIslands = if (maximumIslandSize < minimumIslandSize) emptyList()
+                    else unpickedRegions.filter { region ->
+                        val start = tileMap[region.startPosition!!]
+                        val size = tileMap.continentSizes[start.getContinent()] ?: 0
+                        start.isAdjacentToCoast() &&
+                            size in minimumIslandSize..maximumIslandSize &&
+                            start.getTilesInDistanceRange(1..2).count { it.isLand } >= 7
+                    }
+                val englishIsland = eligibleIslands.maxByOrNull { region ->
+                    val start = tileMap[region.startPosition!!]
+                    val size = tileMap.continentSizes[start.getContinent()] ?: 0
+                    (tileData[start]?.startScore ?: 0) + size.coerceAtMost(150) / 3
+                }
+                if (englishIsland != null) {
+                    logAssignRegion(true, BiasTypes.Coastal, england, englishIsland)
+                    assignCivToRegion(england, englishIsland)
+                    unpickedRegions.remove(englishIsland)
+                    islandAssignedEngland = england
+                }
+            }
+        }
+
+        // Avoid assigning England a second start through the regular bias buckets.
+        val civBiases = civilizations.filterNot { it == islandAssignedEngland }.associateWith {
             ruleset.nations[it.civName]!!.getStartBias(ruleset, it.getGameContextForStartBias())
         }
         // This ensures each civ can only be in one of the buckets
@@ -294,7 +330,6 @@ class MapRegions (val ruleset: Ruleset) {
                 ?.toMutableList() // We might fill this up as we go
                 ?: mutableListOf()
         val positiveBiasFallbackCivs = mutableListOf<Civilization>() // Civs who couldn't get their desired region at first pass
-        val unpickedRegions = regions.toMutableList()
 
         // First assign coast bias civs
         for (civ in coastBiasCivs) {
