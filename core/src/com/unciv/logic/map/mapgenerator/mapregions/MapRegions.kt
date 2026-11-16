@@ -264,32 +264,56 @@ class MapRegions (val ruleset: Ruleset) {
             StartNormalizer.normalizeStart(tileMap[region.startPosition!!], tileMap, tileData, ruleset, isMinorCiv = false)
         }
 
-        // GS_ENGLAND_ISLAND_START_PC_V1:
-        // On Maritime Continents, give England first pick of a viable island
-        // starting region rather than simply an arbitrary coastal start.
-        // A smaller connected landmass is preferred over a one-tile island,
-        // and no custom choice is made if no suitable region exists.
+        // GS_ENGLAND_ISLAND_START_V2_SMALL_HOMELAND:
+        // England prefers an independent, compact island where the capital plus
+        // one or two other cities can fit using the actual same-continent city
+        // spacing rule. Never change map terrain or make any new starting spot.
         val unpickedRegions = regions.toMutableList()
         var islandAssignedEngland: Civilization? = null
         if (maritime && !gameParameters.noStartBias) {
             val england = civilizations.firstOrNull { it.civName == "England" }
             if (england != null) {
-                val largestLandmass = tileMap.continentSizes.values.maxOrNull() ?: 0
-                val minimumIslandSize = (tileMap.values.size / 600).coerceIn(24, 65)
-                val maximumIslandSize = largestLandmass * 60 / 100
-                val eligibleIslands = if (maximumIslandSize < minimumIslandSize) emptyList()
-                    else unpickedRegions.filter { region ->
-                        val start = tileMap[region.startPosition!!]
-                        val size = tileMap.continentSizes[start.getContinent()] ?: 0
-                        start.isAdjacentToCoast() &&
-                            size in minimumIslandSize..maximumIslandSize &&
-                            start.getTilesInDistanceRange(1..2).count { it.isLand } >= 7
-                    }
-                val englishIsland = eligibleIslands.maxByOrNull { region ->
+                // Core target 28..50 land tiles; 24..55 is a limited fallback.
+                // The previous version could pick up to 60% of the main continent.
+                val citySpacing = ruleset.modOptions.constants.minimalCityDistance
+                val islandLand = tileMap.values.asSequence()
+                    .filter { it.isLand && !it.isImpassible() }
+                    .groupBy { it.getContinent() }
+                val startsPerContinent = regions.groupingBy { region ->
+                    tileMap[region.startPosition!!].getContinent()
+                }.eachCount()
+
+                val englishIsland = unpickedRegions.mapNotNull { region ->
                     val start = tileMap[region.startPosition!!]
-                    val size = tileMap.continentSizes[start.getContinent()] ?: 0
-                    (tileData[start]?.startScore ?: 0) + size.coerceAtMost(150) / 3
-                }
+                    val continent = start.getContinent()
+                    val size = tileMap.continentSizes[continent] ?: 0
+                    if (size !in 24..55 || !start.isAdjacentToCoast() ||
+                        start.getTilesInDistanceRange(1..2).count { it.isLand } < 7
+                    ) return@mapNotNull null
+
+                    // A future city must be on the same connected island, on
+                    // passable land, and outside London's minimum city spacing.
+                    // Pre-settlement we cannot guarantee later ownership,
+                    // foreign settlement, or future resource development.
+                    val otherSites = (islandLand[continent] ?: emptyList())
+                        .filter { it != start && start.aerialDistanceTo(it) > citySpacing }
+                    if (otherSites.isEmpty()) return@mapNotNull null
+                    val canFitThree = otherSites.any { one ->
+                        otherSites.any { two -> one.aerialDistanceTo(two) > citySpacing }
+                    }
+
+                    // Give a dedicated British island preference over sharing
+                    // one starting continent with a different major civ.
+                    val exclusiveStart = startsPerContinent[continent] == 1
+                    val idealSize = size in 28..50
+                    val score = (if (idealSize) 1_000_000 else 0) +
+                        (if (exclusiveStart) 100_000 else 0) +
+                        (if (canFitThree) 10_000 else 0) +
+                        (tileData[start]?.startScore ?: 0) -
+                        kotlin.math.abs(size - 38) * 8
+                    region to score
+                }.maxByOrNull { it.second }?.first
+
                 if (englishIsland != null) {
                     logAssignRegion(true, BiasTypes.Coastal, england, englishIsland)
                     assignCivToRegion(england, englishIsland)
