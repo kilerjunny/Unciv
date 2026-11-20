@@ -13,6 +13,7 @@ import com.unciv.logic.market.WorldMarketTrading
 import com.unciv.logic.market.WorldMarketOrderPurchase
 import com.unciv.logic.market.WorldMarketHistory
 import com.unciv.logic.market.WorldMarketRouteStats
+import com.unciv.logic.market.WorldMarketCityStatistics
 import com.unciv.logic.market.WorldMarketMainRoutes
 import com.unciv.logic.market.WorldMarketVirtualCarriers
 import com.unciv.models.ruleset.tile.ResourceType
@@ -33,6 +34,11 @@ class WorldMarketTradeSection(
 
     private var expanded = true
     private var historyOpen = false
+    // GS_CITY_TRADE_STATS_V1: UI-only state; recalculated only on page open.
+    private var cityStatsOpen = false
+    private var cityStatsMineOnly = true
+    private var cityStatsRecentWindow = false
+    private var cityStatsSortBalance = false
     private var performanceOpen = false
     private var militaryMarketOpen = false
     private var tradeMapOpen = merchantMode
@@ -111,6 +117,7 @@ class WorldMarketTradeSection(
             mapButton.onClick {
                 tradeMapOpen = true
                 historyOpen = false
+                cityStatsOpen = false
                 performanceOpen = false
                 render()
                 parentTab.overviewScreen.resizePage(parentTab)
@@ -121,17 +128,30 @@ class WorldMarketTradeSection(
             historyButton.onClick {
                 historyOpen = true
                 tradeMapOpen = false
+                cityStatsOpen = false
                 performanceOpen = false
                 render()
                 parentTab.overviewScreen.resizePage(parentTab)
             }
-            pages.add(historyButton).padRight(5f)
+            pages.add(historyButton).padRight(5f).row()
+
+            val cityStatsButton = TextButton(if (cityStatsOpen) "도시 무역 통계 ✓" else "도시 무역 통계", BaseScreen.skin)
+            cityStatsButton.onClick {
+                cityStatsOpen = true
+                tradeMapOpen = false
+                historyOpen = false
+                performanceOpen = false
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            pages.add(cityStatsButton).padRight(5f)
 
             val perfButton = TextButton(if (performanceOpen) "성능 진단 ✓" else "성능 진단", BaseScreen.skin)
             perfButton.onClick {
                 performanceOpen = true
                 tradeMapOpen = false
                 historyOpen = false
+                cityStatsOpen = false
                 render()
                 parentTab.overviewScreen.resizePage(parentTab)
             }
@@ -177,6 +197,82 @@ class WorldMarketTradeSection(
             for (line in GrandStrategyPerf.reportLines(gameId)) {
                 add(line.toLabel(hideIcons = true)).left().row()
             }
+            return
+        }
+
+        // GS_CITY_TRADE_STATS_V1: compute from settled records, never pathfind or change gold.
+        if (cityStatsOpen) {
+            val viewer = playerView.getCiv()
+            val game = viewer.gameInfo
+            val scopeCiv = if (cityStatsMineOnly && !playerView.isSpectator()) viewer.civID else null
+            val period = if (cityStatsRecentWindow) WorldMarketRouteStats.windowTurns(game) else null
+            val report = WorldMarketCityStatistics.calculate(game, scopeCiv, period)
+
+            val choices = Table(BaseScreen.skin)
+            val scopeButton = TextButton(
+                if (scopeCiv != null) "내 문명 ✓" else "전체 국가", BaseScreen.skin)
+            scopeButton.onClick {
+                cityStatsMineOnly = !cityStatsMineOnly
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            choices.add(scopeButton).padRight(5f)
+            val periodButton = TextButton(
+                if (cityStatsRecentWindow) "최근 ${WorldMarketRouteStats.windowTurns(game)}턴 ✓" else "최근 100건", BaseScreen.skin)
+            periodButton.onClick {
+                cityStatsRecentWindow = !cityStatsRecentWindow
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            choices.add(periodButton).row()
+            val sortButton = TextButton(
+                if (cityStatsSortBalance) "무역수지 순위 ✓" else "수출 순수입 순위 ✓", BaseScreen.skin)
+            sortButton.onClick {
+                cityStatsSortBalance = !cityStatsSortBalance
+                render()
+                parentTab.overviewScreen.resizePage(parentTab)
+            }
+            choices.add(sortButton).colspan(2).left()
+            add(choices).left().row()
+
+            add("세계 시장 도시별 통계 · 기록된 거래 ${report.tradesInScope}건".toLabel(
+                fontSize = Constants.headingFontSize, hideIcons = true)).left().growX().row()
+            add("집계 범위: 저장된 최근 최대 100건${if (period != null) " 중 최근 ${period}턴" else ""}; 과거 전체 누적이 아닙니다.".toLabel(hideIcons = true))
+                .left().growX().row()
+            add("순수입 = 실제 판매대금 - 실제 통행료. 무역수지 = 판매 순수입 - 구매 지출.".toLabel(hideIcons = true))
+                .left().growX().row()
+            add("생산비·운송비 추정치는 실제 금화 지출이 아니므로 차감하지 않습니다. 통행료 수취는 국가 단위이며 도시별로 배분하지 않습니다.".toLabel(hideIcons = true))
+                .left().growX().row()
+
+            val sorted = if (cityStatsSortBalance)
+                report.cities.sortedWith(compareByDescending<WorldMarketCityStatistics.CityTotals> { it.tradeBalanceGold }
+                    .thenByDescending { it.netSalesGold }.thenBy { it.cityName }.thenBy { it.civId })
+            else report.cities.sortedWith(compareByDescending<WorldMarketCityStatistics.CityTotals> { it.netSalesGold }
+                .thenByDescending { it.tradeBalanceGold }.thenBy { it.cityName }.thenBy { it.civId })
+
+            add("도시 ${sorted.size}곳 · 판매 순수입 합계 ${sorted.sumOf { it.netSalesGold }}G · 구매 지출 합계 ${sorted.sumOf { it.importSpendingGold }}G · 무역수지 합계 ${sorted.sumOf { it.tradeBalanceGold }}G".toLabel(hideIcons = true))
+                .left().growX().row()
+            if (report.exportWithoutCity > 0 || report.importWithoutCity > 0)
+                add("도시 귀속 정보 없음: 수출 ${report.exportWithoutCity}건 / 수입 ${report.importWithoutCity}건 (합계에서 제외)".toLabel(hideIcons = true))
+                    .left().growX().row()
+            if (sorted.isEmpty()) {
+                add("아직 도시 이름이 확인된 세계 시장 거래가 없습니다.".toLabel(hideIcons = true)).left().row()
+            }
+
+            // Limit widgets, not ledger counts, to keep large-map Android UI light.
+            for ((rank, stat) in sorted.take(30).withIndex()) {
+                val civName = game.civilizations.firstOrNull { it.civID == stat.civId }
+                    ?.civName?.tr() ?: stat.civId
+                add("${rank + 1}위 · ${stat.cityName} (${civName})".toLabel(hideIcons = true))
+                    .left().growX().padTop(8f).row()
+                add("판매 순수입 ${stat.netSalesGold}G (매출 ${stat.grossSalesGold}G - 통행료 ${stat.actualTollsPaidGold}G) · 구매 지출 ${stat.importSpendingGold}G · 무역수지 ${stat.tradeBalanceGold}G".toLabel(hideIcons = true))
+                    .left().growX().row()
+                add("수출 ${stat.exportTrades}건/${stat.exportedUnits}개 · 수입 ${stat.importTrades}건/${stat.importedUnits}개${if (stat.capitalFallbackTrades > 0) " · 수도 대체 귀속 ${stat.capitalFallbackTrades}건" else ""}".toLabel(hideIcons = true))
+                    .left().growX().row()
+            }
+            if (sorted.size > 30)
+                add("화면 성능을 위해 상위 30개 도시만 표시합니다. 위 합계에는 전체 도시가 포함됩니다.".toLabel(hideIcons = true))
+                    .left().growX().row()
             return
         }
 
